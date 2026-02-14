@@ -1,0 +1,12 @@
+export { ConfigTab } from "./ConfigTab";
+export { MapsTab } from "./MapsTab";
+export { PlayersTab } from "./PlayersTab";
+export { BotsTab } from "./BotsTab";
+export { SkinsTab } from "./SkinsTab";
+export { StatsTab } from "./StatsTab";
+export { PluginsTab } from "./PluginsTab";
+export { MonitoringTab } from "./MonitoringTab";
+export { BenchmarkTab } from "./BenchmarkTab";
+export { BackupsTab } from "./BackupsTab";
+export { FilesTab } from "./FilesTab";
+export { SchedulerTab } from "./SchedulerTab";

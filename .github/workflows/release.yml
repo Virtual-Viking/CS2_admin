@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Build
+        run: wails build -clean -o CS2Admin.exe -ldflags "-X main.appVersion=${{ steps.version.outputs.VERSION }}"
+      - name: Create portable zip
+        run: Compress-Archive -Path build/bin/CS2Admin.exe -DestinationPath CS2Admin-v${{ steps.version.outputs.VERSION }}-windows-portable.zip
+      - name: Generate checksums
+        run: |
+          $hash1 = Get-FileHash build/bin/CS2Admin.exe -Algorithm SHA256
+          "$($hash1.Hash)  CS2Admin.exe" | Out-File SHA256SUMS.txt
+          $hash2 = Get-FileHash "CS2Admin-v${{ steps.version.outputs.VERSION }}-windows-portable.zip" -Algorithm SHA256
+          "$($hash2.Hash)  CS2Admin-v${{ steps.version.outputs.VERSION }}-windows-portable.zip" | Out-File -Append SHA256SUMS.txt
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/bin/CS2Admin.exe
+            CS2Admin-v${{ steps.version.outputs.VERSION }}-windows-portable.zip
+            SHA256SUMS.txt
+          generate_release_notes: true

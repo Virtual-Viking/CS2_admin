@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Go lint
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+
+      # Go test
+      - name: Go tests
+        run: go test ./...
+
+      # Frontend lint and type-check
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+      - name: Frontend type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
+
+  build-windows:
+    runs-on: windows-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Build
+        run: wails build -clean
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CS2Admin-windows
+          path: build/bin/CS2Admin.exe
