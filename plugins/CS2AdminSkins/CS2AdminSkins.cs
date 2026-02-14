@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -18,17 +19,18 @@ using Microsoft.Extensions.Logging;
 namespace CS2AdminSkins;
 
 /// <summary>
-/// CS2 Admin Skins v4 — Applies skins using the same method as WeaponPaints:
+/// CS2 Admin Skins v5 — StatTrak Factory New skins with persistent player selections.
 ///   1. Native CAttributeList_SetOrAddAttributeValueByName for attributes
-///   2. OnEntityCreated + GiveNamedItemFunc.Hook to apply at weapon creation time
-///   3. Real CS2 skin database (skins.json from WeaponPaints data)
+///   2. All skins are StatTrak (kill counter) + Factory New (0.001 wear)
+///   3. Player selections saved to player_skins.json, loaded on server start
+///   4. Kill tracking updates StatTrak counters in real-time
 /// </summary>
 public class CS2AdminSkins : BasePlugin
 {
     public override string ModuleName => "CS2 Admin Skins";
-    public override string ModuleVersion => "4.0.0";
+    public override string ModuleVersion => "5.0.0";
     public override string ModuleAuthor => "CS2Admin";
-    public override string ModuleDescription => "In-game skin selection — same approach as WeaponPaints";
+    public override string ModuleDescription => "StatTrak Factory New skins with persistent player selections";
 
     // ─── Native function for setting item attributes ─────────────────────
     private static MemoryFunctionVoid<nint, string, float>? _setOrAddAttr;
@@ -40,6 +42,18 @@ public class CS2AdminSkins : BasePlugin
     private readonly Dictionary<ulong, PlayerMenuContext> _playerMenus = new();
     private ulong _nextItemId = 68000;
     private readonly List<CCSPlayerController> _connectedPlayers = new();
+
+    // ─── Persistence ─────────────────────────────────────────────────────
+    private string _playerSkinsPath = "";
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true
+    };
+
+    // ─── Constants ───────────────────────────────────────────────────────
+    private const float FactoryNewWear = 0.001f; // Pristine Factory New
+    private const int StatTrakQuality = 9;       // EntityQuality for StatTrak items
 
     // ─── Weapon categories for the menu ──────────────────────────────────
     private static readonly Dictionary<string, string[]> WeaponSlots = new()
@@ -65,7 +79,7 @@ public class CS2AdminSkins : BasePlugin
         ["weapon_m249"] = "M249", ["weapon_negev"] = "Negev",
     };
 
-    // Weapon name → defindex lookup (for menu → defindex mapping)
+    // Weapon name → defindex lookup
     private static readonly Dictionary<string, int> NameToDefindex = new()
     {
         ["weapon_deagle"] = 1, ["weapon_elite"] = 2, ["weapon_fiveseven"] = 3, ["weapon_glock"] = 4,
@@ -83,6 +97,8 @@ public class CS2AdminSkins : BasePlugin
 
     public override void Load(bool hotReload)
     {
+        _playerSkinsPath = Path.Combine(ModuleDirectory, "player_skins.json");
+
         // Step 1: Load native function
         try
         {
@@ -95,26 +111,28 @@ public class CS2AdminSkins : BasePlugin
         {
             _nativeFuncLoaded = false;
             Logger.LogError("[CS2AdminSkins] FAILED to load native function: {Error}", ex.Message);
-            Logger.LogError("[CS2AdminSkins] Skins will NOT work without this function!");
         }
 
         // Step 2: Load skin database
         LoadSkinDatabase();
 
-        // Step 3: Register commands
+        // Step 3: Load persisted player selections
+        LoadPlayerSelections();
+
+        // Step 4: Register commands
         AddCommand("css_skins", "Open skin selection menu", OnSkinsCommand);
         AddCommand("css_s", "Skin menu quick select", OnSelectionCommand);
         AddCommandListener("say", OnSay);
         AddCommandListener("say_team", OnSay);
 
-        // Step 4: Register event handlers
+        // Step 5: Register event handlers
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnect);
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
+        RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
         RegisterListener<Listeners.OnEntityCreated>(OnEntityCreated);
 
-        // Step 5: Hook GiveNamedItem — this is the KEY hook that WeaponPaints uses
-        // It fires AFTER a weapon is given to a player, letting us modify it immediately
+        // Step 6: Hook GiveNamedItem
         try
         {
             VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPost, HookMode.Post);
@@ -125,12 +143,14 @@ public class CS2AdminSkins : BasePlugin
             Logger.LogError("[CS2AdminSkins] FAILED to hook GiveNamedItemFunc: {Error}", ex.Message);
         }
 
-        Logger.LogInformation("[CS2AdminSkins] v4.0 loaded — {Count} skins, native={Native}",
-            _allSkins.Count, _nativeFuncLoaded ? "YES" : "NO");
+        Logger.LogInformation("[CS2AdminSkins] v5.0 loaded — {Count} skins, native={Native}, {Players} saved players",
+            _allSkins.Count, _nativeFuncLoaded ? "YES" : "NO", _playerSkins.Count);
     }
 
     public override void Unload(bool hotReload)
     {
+        // Save all player data before unloading
+        SaveAllPlayerSelections();
         try { VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post); }
         catch { }
     }
@@ -149,10 +169,7 @@ public class CS2AdminSkins : BasePlugin
         try
         {
             var json = File.ReadAllText(jsonPath);
-            var skins = JsonSerializer.Deserialize<List<SkinEntry>>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            var skins = JsonSerializer.Deserialize<List<SkinEntry>>(json, JsonOpts);
 
             if (skins != null && skins.Count > 0)
             {
@@ -166,13 +183,60 @@ public class CS2AdminSkins : BasePlugin
         }
     }
 
+    // ─── Player Selection Persistence ────────────────────────────────────
+
+    private void LoadPlayerSelections()
+    {
+        if (!File.Exists(_playerSkinsPath))
+        {
+            Logger.LogInformation("[CS2AdminSkins] No saved player selections found (first run)");
+            return;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(_playerSkinsPath);
+            var db = JsonSerializer.Deserialize<PlayerSkinsDatabase>(json, JsonOpts);
+            if (db?.Players == null) return;
+
+            foreach (var kvp in db.Players)
+            {
+                if (ulong.TryParse(kvp.Key, out var steamId))
+                {
+                    _playerSkins[steamId] = kvp.Value;
+                }
+            }
+
+            Logger.LogInformation("[CS2AdminSkins] Loaded selections for {Count} players", _playerSkins.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[CS2AdminSkins] Failed to load player_skins.json");
+        }
+    }
+
+    private void SaveAllPlayerSelections()
+    {
+        try
+        {
+            var db = new PlayerSkinsDatabase();
+            foreach (var kvp in _playerSkins)
+            {
+                db.Players[kvp.Key.ToString()] = kvp.Value;
+            }
+
+            var json = JsonSerializer.Serialize(db, JsonOpts);
+            File.WriteAllText(_playerSkinsPath, json);
+            Logger.LogInformation("[CS2AdminSkins] Saved selections for {Count} players", _playerSkins.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[CS2AdminSkins] Failed to save player_skins.json");
+        }
+    }
+
     // ─── Weapon Creation Hooks (THE KEY PART) ────────────────────────────
 
-    /// <summary>
-    /// Fires AFTER GiveNamedItem creates a weapon. We apply the skin HERE,
-    /// before the weapon is first synced to the client.
-    /// This is the EXACT same hook WeaponPaints uses.
-    /// </summary>
     private HookResult OnGiveNamedItemPost(DynamicHook hook)
     {
         try
@@ -195,9 +259,6 @@ public class CS2AdminSkins : BasePlugin
         return HookResult.Continue;
     }
 
-    /// <summary>
-    /// Backup hook: catches weapon entities as they're created in the world.
-    /// </summary>
     private void OnEntityCreated(CEntityInstance entity)
     {
         if (!entity.DesignerName.Contains("weapon"))
@@ -231,7 +292,7 @@ public class CS2AdminSkins : BasePlugin
     // ─── Core Skin Application ───────────────────────────────────────────
 
     /// <summary>
-    /// Apply the player's selected skin to a weapon. Called at weapon creation time.
+    /// Apply the player's selected skin as StatTrak Factory New.
     /// Uses CAttributeList_SetOrAddAttributeValueByName — the native engine function.
     /// </summary>
     private void ApplySkinToWeapon(CCSPlayerController player, CBasePlayerWeapon weapon)
@@ -241,11 +302,11 @@ public class CS2AdminSkins : BasePlugin
 
         int weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
 
-        // Check if player has a skin selected for this weapon
         if (!sel.WeaponPaints.TryGetValue(weaponDefIndex, out var paintKit) || paintKit <= 0)
             return;
 
         bool isLegacy = sel.WeaponLegacy.GetValueOrDefault(weaponDefIndex, false);
+        int statTrakCount = sel.StatTrakCounts.GetValueOrDefault(weaponDefIndex, 0);
 
         try
         {
@@ -263,28 +324,41 @@ public class CS2AdminSkins : BasePlugin
 
             // Set account ID to player
             item.AccountID = (uint)player.SteamID;
-            item.EntityQuality = 0;
 
-            // Set fallback values
+            // StatTrak quality (9 = StatTrak)
+            item.EntityQuality = StatTrakQuality;
+
+            // Set fallback values — Factory New + StatTrak
             weapon.FallbackPaintKit = paintKit;
             weapon.FallbackSeed = 0;
-            weapon.FallbackWear = 0.01f;
-            weapon.FallbackStatTrak = -1;
+            weapon.FallbackWear = FactoryNewWear;
+            weapon.FallbackStatTrak = statTrakCount;
 
-            // Set attributes via native engine function
+            // ── Set paint attributes via native engine function ──
             _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
                 "set item texture prefab", paintKit);
             _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
                 "set item texture seed", 0);
             _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                "set item texture wear", 0.01f);
+                "set item texture wear", FactoryNewWear);
+
+            // ── Set StatTrak (kill eater) attributes ──
+            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
+                "kill eater", ViewAsFloat((uint)statTrakCount));
+            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
+                "kill eater score type", 0);
 
             _setOrAddAttr.Invoke(item.AttributeList.Handle,
                 "set item texture prefab", paintKit);
             _setOrAddAttr.Invoke(item.AttributeList.Handle,
                 "set item texture seed", 0);
             _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                "set item texture wear", 0.01f);
+                "set item texture wear", FactoryNewWear);
+
+            _setOrAddAttr.Invoke(item.AttributeList.Handle,
+                "kill eater", ViewAsFloat((uint)statTrakCount));
+            _setOrAddAttr.Invoke(item.AttributeList.Handle,
+                "kill eater score type", 0);
 
             // Handle bodygroup for legacy vs new model skins
             try
@@ -293,8 +367,9 @@ public class CS2AdminSkins : BasePlugin
             }
             catch { }
 
-            Logger.LogInformation("[CS2AdminSkins] Applied paint {Paint} to defindex {Def} for {Player} (legacy={Legacy})",
-                paintKit, weaponDefIndex, player.PlayerName, isLegacy);
+            Logger.LogInformation(
+                "[CS2AdminSkins] Applied ST FN paint {Paint} to defindex {Def} for {Player} (kills={Kills}, legacy={Legacy})",
+                paintKit, weaponDefIndex, player.PlayerName, statTrakCount, isLegacy);
         }
         catch (Exception ex)
         {
@@ -303,10 +378,77 @@ public class CS2AdminSkins : BasePlugin
         }
     }
 
+    // ─── StatTrak Kill Tracking ──────────────────────────────────────────
+
     /// <summary>
-    /// Refresh weapons: kill existing guns and re-give them.
-    /// The GiveNamedItemFunc hook will then apply skins to the new weapons.
+    /// When a player kills someone, increment StatTrak on the active weapon
+    /// and update the counter visually in real-time.
     /// </summary>
+    [GameEventHandler]
+    private HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
+    {
+        var attacker = @event.Attacker;
+        var victim = @event.Userid;
+
+        // Only count real kills (not self-kills, not world kills)
+        if (attacker == null || !attacker.IsValid || attacker.IsBot)
+            return HookResult.Continue;
+        if (victim == null || !victim.IsValid || victim == attacker)
+            return HookResult.Continue;
+
+        if (!_playerSkins.TryGetValue(attacker.SteamID, out var sel))
+            return HookResult.Continue;
+
+        // Get the active weapon
+        var activeWeapon = attacker.PlayerPawn?.Value?.WeaponServices?.ActiveWeapon?.Value;
+        if (activeWeapon == null || !activeWeapon.IsValid) return HookResult.Continue;
+
+        int weaponDefIndex = activeWeapon.AttributeManager.Item.ItemDefinitionIndex;
+
+        // Only track if this weapon has a custom skin
+        if (!sel.WeaponPaints.TryGetValue(weaponDefIndex, out var paintKit) || paintKit <= 0)
+            return HookResult.Continue;
+
+        // Increment the kill counter
+        var newCount = sel.StatTrakCounts.GetValueOrDefault(weaponDefIndex, 0) + 1;
+        sel.StatTrakCounts[weaponDefIndex] = newCount;
+
+        // Update the weapon's StatTrak display in real-time
+        try
+        {
+            activeWeapon.FallbackStatTrak = newCount;
+
+            if (_nativeFuncLoaded && _setOrAddAttr != null)
+            {
+                var item = activeWeapon.AttributeManager.Item;
+                _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
+                    "kill eater", ViewAsFloat((uint)newCount));
+                _setOrAddAttr.Invoke(item.AttributeList.Handle,
+                    "kill eater", ViewAsFloat((uint)newCount));
+            }
+
+            Logger.LogInformation("[CS2AdminSkins] StatTrak: {Player} kill #{Count} with defindex {Def}",
+                attacker.PlayerName, newCount, weaponDefIndex);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("[CS2AdminSkins] Failed to update StatTrak: {Error}", ex.Message);
+        }
+
+        return HookResult.Continue;
+    }
+
+    /// <summary>
+    /// Reinterpret an unsigned int as float (bit-for-bit), as required by the
+    /// attribute system for integer-type attributes stored in float fields.
+    /// </summary>
+    private static float ViewAsFloat(uint value)
+    {
+        return BitConverter.Int32BitsToSingle((int)value);
+    }
+
+    // ─── Weapon Refresh ──────────────────────────────────────────────────
+
     private void RefreshPlayerWeapons(CCSPlayerController player)
     {
         if (!player.IsValid || !player.PawnIsAlive) return;
@@ -381,7 +523,18 @@ public class CS2AdminSkins : BasePlugin
     {
         var player = @event.Userid;
         if (player != null && player.IsValid && !player.IsBot)
+        {
             _connectedPlayers.Add(player);
+
+            // Log if returning player has saved skins
+            if (_playerSkins.ContainsKey(player.SteamID))
+            {
+                var sel = _playerSkins[player.SteamID];
+                Logger.LogInformation("[CS2AdminSkins] Returning player {Name} — {Count} saved skins loaded",
+                    player.PlayerName, sel.WeaponPaints.Count);
+                player.PrintToChat($" \x04[Skins]\x01 Welcome back! Your \x10{sel.WeaponPaints.Count}\x01 saved skin(s) will auto-apply.");
+            }
+        }
         return HookResult.Continue;
     }
 
@@ -393,6 +546,10 @@ public class CS2AdminSkins : BasePlugin
         {
             _connectedPlayers.Remove(player);
             _playerMenus.Remove(player.SteamID);
+
+            // Save this player's data on disconnect
+            if (_playerSkins.ContainsKey(player.SteamID))
+                SaveAllPlayerSelections();
         }
         return HookResult.Continue;
     }
@@ -400,8 +557,7 @@ public class CS2AdminSkins : BasePlugin
     [GameEventHandler]
     private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
     {
-        // Skins are now applied via the GiveNamedItemFunc hook automatically.
-        // No timer needed — the hook fires when the game gives weapons on spawn.
+        // Skins are applied via the GiveNamedItemFunc hook automatically.
         return HookResult.Continue;
     }
 
@@ -466,8 +622,7 @@ public class CS2AdminSkins : BasePlugin
         if (!_nativeFuncLoaded)
         {
             player.PrintToChat(" \x02[Skins] ERROR: Native function not loaded. Skins cannot work.");
-            player.PrintToConsole("[Skins] ERROR: CAttributeList_SetOrAddAttributeValueByName failed to load from gamedata.");
-            player.PrintToConsole("[Skins] The gamedata signature may be outdated for your CS2 version.");
+            player.PrintToConsole("[Skins] ERROR: CAttributeList_SetOrAddAttributeValueByName failed to load.");
             return;
         }
 
@@ -480,10 +635,16 @@ public class CS2AdminSkins : BasePlugin
 
         player.PrintToChat(" \x04[Skins]\x01 Menu opened in \x10CONSOLE\x01. Press \x04~\x01 to open console.");
         player.PrintToChat(" \x04[Skins]\x01 Type \x10css_s <number>\x01 in console to navigate.");
+        player.PrintToChat(" \x04[Skins]\x01 All skins are \x10StatTrak Factory New\x01!");
+
+        // Show current skin count for this player
+        var savedCount = _playerSkins.TryGetValue(player.SteamID, out var sel) ? sel.WeaponPaints.Count : 0;
 
         player.PrintToConsole("");
         player.PrintToConsole("======================================");
-        player.PrintToConsole("       CS2 ADMIN SKIN SELECTOR v4     ");
+        player.PrintToConsole("    CS2 ADMIN SKIN SELECTOR v5");
+        player.PrintToConsole("    StatTrak | Factory New");
+        player.PrintToConsole($"    Saved skins: {savedCount}");
         player.PrintToConsole("======================================");
         var slots = WeaponSlots.Keys.ToArray();
         for (int i = 0; i < slots.Length; i++)
@@ -500,6 +661,9 @@ public class CS2AdminSkins : BasePlugin
         ctx.State = MenuState.WeaponSubSelect;
         ctx.SubMenuWeapons = weapons;
 
+        // Get player's current selections to show equipped skins
+        _playerSkins.TryGetValue(player.SteamID, out var sel);
+
         player.PrintToConsole("");
         player.PrintToConsole($"======= {slotName.ToUpper()} =======");
         for (int i = 0; i < weapons.Length; i++)
@@ -507,7 +671,18 @@ public class CS2AdminSkins : BasePlugin
             var name = WeaponDisplayNames.GetValueOrDefault(weapons[i], weapons[i]);
             var defindex = NameToDefindex.GetValueOrDefault(weapons[i], 0);
             var count = _allSkins.Count(s => s.WeaponDefindex == defindex);
-            player.PrintToConsole($"  [{i + 1}]  {name}  ({count} skins)");
+
+            // Show currently equipped skin if any
+            var equipped = "";
+            if (sel != null && sel.WeaponPaints.TryGetValue(defindex, out var paintId))
+            {
+                var skinName = _allSkins.FirstOrDefault(s => s.WeaponDefindex == defindex && s.Paint == paintId)?.PaintName;
+                var kills = sel.StatTrakCounts.GetValueOrDefault(defindex, 0);
+                if (skinName != null)
+                    equipped = $"  [ST: {kills}] {skinName}";
+            }
+
+            player.PrintToConsole($"  [{i + 1}]  {name}  ({count} skins){equipped}");
         }
         player.PrintToConsole("  [0]  Back");
         player.PrintToConsole("--------------------------------------");
@@ -526,13 +701,13 @@ public class CS2AdminSkins : BasePlugin
         var totalPages = (int)Math.Ceiling(ctx.FilteredSkins.Count / (double)PlayerMenuContext.PageSize);
 
         player.PrintToConsole("");
-        player.PrintToConsole($"======= {weaponName} SKINS =======");
+        player.PrintToConsole($"======= {weaponName} SKINS (StatTrak FN) =======");
         player.PrintToConsole($"  Page {ctx.CurrentPage + 1}/{totalPages}  ({ctx.FilteredSkins.Count} total)");
         player.PrintToConsole("");
         for (int i = 0; i < skins.Count; i++)
         {
             var legacy = skins[i].LegacyModel ? " [L]" : "";
-            player.PrintToConsole($"  [{i + 1}]  {skins[i].PaintName}{legacy}");
+            player.PrintToConsole($"  [{i + 1}]  ST {skins[i].PaintName} (FN){legacy}");
         }
         player.PrintToConsole("");
         if (ctx.CurrentPage + 1 < totalPages)
@@ -627,17 +802,26 @@ public class CS2AdminSkins : BasePlugin
         sel.WeaponPaints[skin.WeaponDefindex] = skin.Paint;
         sel.WeaponLegacy[skin.WeaponDefindex] = skin.LegacyModel;
 
+        // Preserve existing StatTrak count if switching skins on same weapon
+        if (!sel.StatTrakCounts.ContainsKey(skin.WeaponDefindex))
+            sel.StatTrakCounts[skin.WeaponDefindex] = 0;
+
+        var kills = sel.StatTrakCounts[skin.WeaponDefindex];
+
         player.PrintToConsole("");
-        player.PrintToConsole($"  >>> APPLIED: {skin.PaintName} (paint #{skin.Paint})");
-        player.PrintToConsole($"  >>> Legacy model: {skin.LegacyModel}");
-        player.PrintToConsole("  Type css_skins for more, or respawn to see changes.");
+        player.PrintToConsole($"  >>> APPLIED: StatTrak {skin.PaintName} (Factory New)");
+        player.PrintToConsole($"  >>> Paint #{skin.Paint} | Kills: {kills} | Legacy: {skin.LegacyModel}");
+        player.PrintToConsole("  Skin saved — will auto-apply next time you play!");
         player.PrintToConsole("");
 
-        player.PrintToChat($" \x04[Skins]\x01 Applied \x10{skin.PaintName}\x01! Refreshing weapons...");
+        player.PrintToChat($" \x04[Skins]\x01 Applied \x10StatTrak {skin.PaintName} (FN)\x01! Refreshing...");
 
         CloseMenu(player);
 
-        // Refresh weapons so the GiveNamedItemFunc hook applies the new skin
+        // Persist to disk
+        SaveAllPlayerSelections();
+
+        // Refresh weapons so the hook applies the new skin
         if (player.PawnIsAlive)
             RefreshPlayerWeapons(player);
     }

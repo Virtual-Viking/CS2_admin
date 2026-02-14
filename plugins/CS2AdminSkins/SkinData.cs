@@ -27,6 +27,7 @@ public class SkinEntry
 
 /// <summary>
 /// Tracks a player's selected skins per weapon defindex.
+/// Serialized to JSON for persistence across server restarts.
 /// </summary>
 public class PlayerSkinSelection
 {
@@ -40,6 +41,21 @@ public class PlayerSkinSelection
     /// Maps weapon_defindex to legacy_model flag for bodygroup handling.
     /// </summary>
     public Dictionary<int, bool> WeaponLegacy { get; set; } = new();
+
+    /// <summary>
+    /// Maps weapon_defindex to StatTrak kill count.
+    /// Persisted so kill counts survive server restarts.
+    /// </summary>
+    public Dictionary<int, int> StatTrakCounts { get; set; } = new();
+}
+
+/// <summary>
+/// Root object for the player_skins.json persistence file.
+/// Maps SteamID64 (as string) to their skin selections.
+/// </summary>
+public class PlayerSkinsDatabase
+{
+    public Dictionary<string, PlayerSkinSelection> Players { get; set; } = new();
 }
 
 /// <summary>
