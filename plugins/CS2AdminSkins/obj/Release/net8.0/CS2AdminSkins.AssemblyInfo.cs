@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CS2AdminSkins")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2137f7ee4935a19fd7c2aba6e2563f64cf9ccf9b")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c7ffd74eea1268d49b93b81688cca3c8662a2a0b")]
 [assembly: System.Reflection.AssemblyProductAttribute("CS2AdminSkins")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CS2AdminSkins")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

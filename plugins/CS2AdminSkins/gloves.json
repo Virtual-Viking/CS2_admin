@@ -1,0 +1,506 @@
+﻿[
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10010,
+        "paint_name":  "Hand Wraps | Spruce DDPAT",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10081,
+        "paint_name":  "Hand Wraps | Desert Shamagh",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10036,
+        "paint_name":  "Hand Wraps | Badlands",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10084,
+        "paint_name":  "Hand Wraps | CAUTION!",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10055,
+        "paint_name":  "Hand Wraps | Duct Tape",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10053,
+        "paint_name":  "Hand Wraps | Cobalt Skulls",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10054,
+        "paint_name":  "Hand Wraps | Overprint",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10082,
+        "paint_name":  "Hand Wraps | Giraffe",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10056,
+        "paint_name":  "Hand Wraps | Arboreal",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10009,
+        "paint_name":  "Hand Wraps | Leather",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10083,
+        "paint_name":  "Hand Wraps | Constrictor",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5032,
+        "weapon_name":  "Hand Wraps",
+        "paint":  10021,
+        "paint_name":  "Hand Wraps | Slaughter",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10024,
+        "paint_name":  "Moto Gloves | Eclipse",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10050,
+        "paint_name":  "Moto Gloves | Turtle",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10079,
+        "paint_name":  "Moto Gloves | Blood Pressure",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10077,
+        "paint_name":  "Moto Gloves | Finish Line",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10049,
+        "paint_name":  "Moto Gloves | POW!",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10080,
+        "paint_name":  "Moto Gloves | 3rd Commando Company",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10026,
+        "paint_name":  "Moto Gloves | Spearmint",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10027,
+        "paint_name":  "Moto Gloves | Boom!",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10078,
+        "paint_name":  "Moto Gloves | Smoke Out",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10028,
+        "paint_name":  "Moto Gloves | Cool Mint",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10052,
+        "paint_name":  "Moto Gloves | Polygon",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5033,
+        "weapon_name":  "Moto Gloves",
+        "paint":  10051,
+        "paint_name":  "Moto Gloves | Transport",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10013,
+        "paint_name":  "Driver Gloves | Lunar Weave",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10070,
+        "paint_name":  "Driver Gloves | Snow Leopard",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10071,
+        "paint_name":  "Driver Gloves | Queen Jaguar",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10015,
+        "paint_name":  "Driver Gloves | Convoy",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10042,
+        "paint_name":  "Driver Gloves | Imperial Plaid",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10016,
+        "paint_name":  "Driver Gloves | Crimson Weave",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10069,
+        "paint_name":  "Driver Gloves | Rezan the Red",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10041,
+        "paint_name":  "Driver Gloves | King Snake",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10040,
+        "paint_name":  "Driver Gloves | Diamondback",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10043,
+        "paint_name":  "Driver Gloves | Overtake",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10072,
+        "paint_name":  "Driver Gloves | Black Tie",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5031,
+        "weapon_name":  "Driver Gloves",
+        "paint":  10044,
+        "paint_name":  "Driver Gloves | Racing Green",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10030,
+        "paint_name":  "Specialist Gloves | Forest DDPAT",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10034,
+        "paint_name":  "Specialist Gloves | Emerald Web",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10063,
+        "paint_name":  "Specialist Gloves | Fade",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10068,
+        "paint_name":  "Specialist Gloves | Field Agent",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10062,
+        "paint_name":  "Specialist Gloves | Buckshot",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10033,
+        "paint_name":  "Specialist Gloves | Crimson Kimono",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10065,
+        "paint_name":  "Specialist Gloves | Marble Fade",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10035,
+        "paint_name":  "Specialist Gloves | Foundation",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10066,
+        "paint_name":  "Specialist Gloves | Lt. Commander",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10067,
+        "paint_name":  "Specialist Gloves | Tiger Strike",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10061,
+        "paint_name":  "Specialist Gloves | Crimson Web",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5034,
+        "weapon_name":  "Specialist Gloves",
+        "paint":  10064,
+        "paint_name":  "Specialist Gloves | Mogul",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10047,
+        "paint_name":  "Sport Gloves | Omega",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10048,
+        "paint_name":  "Sport Gloves | Vice",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10038,
+        "paint_name":  "Sport Gloves | Hedge Maze",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10075,
+        "paint_name":  "Sport Gloves | Scarlet Shamagh",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10074,
+        "paint_name":  "Sport Gloves | Big Game",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10076,
+        "paint_name":  "Sport Gloves | Nocts",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10018,
+        "paint_name":  "Sport Gloves | Superconductor",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10019,
+        "paint_name":  "Sport Gloves | Arid",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10045,
+        "paint_name":  "Sport Gloves | Amphibious",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10046,
+        "paint_name":  "Sport Gloves | Bronze Morph",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10037,
+        "paint_name":  "Sport Gloves | Pandora\u0027s Box",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5030,
+        "weapon_name":  "Sport Gloves",
+        "paint":  10073,
+        "paint_name":  "Sport Gloves | Slingshot",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5027,
+        "weapon_name":  "Bloodhound Gloves",
+        "paint":  10006,
+        "paint_name":  "Bloodhound Gloves | Charred",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5027,
+        "weapon_name":  "Bloodhound Gloves",
+        "paint":  10039,
+        "paint_name":  "Bloodhound Gloves | Guerrilla",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5027,
+        "weapon_name":  "Bloodhound Gloves",
+        "paint":  10008,
+        "paint_name":  "Bloodhound Gloves | Bronzed",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5027,
+        "weapon_name":  "Bloodhound Gloves",
+        "paint":  10007,
+        "paint_name":  "Bloodhound Gloves | Snakebite",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  4725,
+        "weapon_name":  "Broken Fang Gloves",
+        "paint":  10087,
+        "paint_name":  "Broken Fang Gloves | Needle Point",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  4725,
+        "weapon_name":  "Broken Fang Gloves",
+        "paint":  10085,
+        "paint_name":  "Broken Fang Gloves | Jade",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  4725,
+        "weapon_name":  "Broken Fang Gloves",
+        "paint":  10086,
+        "paint_name":  "Broken Fang Gloves | Yellow-banded",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  4725,
+        "weapon_name":  "Broken Fang Gloves",
+        "paint":  10088,
+        "paint_name":  "Broken Fang Gloves | Unhinged",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5035,
+        "weapon_name":  "Hydra Gloves",
+        "paint":  10057,
+        "paint_name":  "Hydra Gloves | Emerald",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5035,
+        "weapon_name":  "Hydra Gloves",
+        "paint":  10060,
+        "paint_name":  "Hydra Gloves | Case Hardened",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5035,
+        "weapon_name":  "Hydra Gloves",
+        "paint":  10058,
+        "paint_name":  "Hydra Gloves | Mangrove",
+        "legacy_model":  false
+    },
+    {
+        "weapon_defindex":  5035,
+        "weapon_name":  "Hydra Gloves",
+        "paint":  10059,
+        "paint_name":  "Hydra Gloves | Rattler",
+        "legacy_model":  false
+    }
+]

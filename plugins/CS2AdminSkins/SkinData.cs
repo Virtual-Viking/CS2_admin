@@ -47,6 +47,18 @@ public class PlayerSkinSelection
     /// Persisted so kill counts survive server restarts.
     /// </summary>
     public Dictionary<int, int> StatTrakCounts { get; set; } = new();
+
+    /// <summary>
+    /// The knife defindex the player has selected (e.g. 507 = Karambit).
+    /// 0 means default knife.
+    /// </summary>
+    public int SelectedKnife { get; set; }
+
+    /// <summary>
+    /// The glove defindex the player has selected (e.g. 5030 = Sport Gloves).
+    /// 0 means default gloves.
+    /// </summary>
+    public int SelectedGlove { get; set; }
 }
 
 /// <summary>
@@ -81,5 +93,5 @@ public class PlayerMenuContext
     public List<SkinEntry> FilteredSkins { get; set; } = new();
     public int CurrentPage { get; set; }
     public string[]? SubMenuWeapons { get; set; }
-    public const int PageSize = 8;
+    public const int PageSize = 27;
 }

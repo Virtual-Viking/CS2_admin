@@ -19,25 +19,22 @@ using Microsoft.Extensions.Logging;
 namespace CS2AdminSkins;
 
 /// <summary>
-/// CS2 Admin Skins v5 — StatTrak Factory New skins with persistent player selections.
-///   1. Native CAttributeList_SetOrAddAttributeValueByName for attributes
-///   2. All skins are StatTrak (kill counter) + Factory New (0.001 wear)
-///   3. Player selections saved to player_skins.json, loaded on server start
-///   4. Kill tracking updates StatTrak counters in real-time
+/// CS2 Admin Skins v6 — Weapons, Knives, Gloves. StatTrak Factory New. Persistent.
 /// </summary>
 public class CS2AdminSkins : BasePlugin
 {
     public override string ModuleName => "CS2 Admin Skins";
-    public override string ModuleVersion => "5.0.0";
+    public override string ModuleVersion => "6.0.0";
     public override string ModuleAuthor => "CS2Admin";
-    public override string ModuleDescription => "StatTrak Factory New skins with persistent player selections";
+    public override string ModuleDescription => "Weapons, knives & gloves — StatTrak Factory New with persistence";
 
-    // ─── Native function for setting item attributes ─────────────────────
+    // ─── Native function ─────────────────────────────────────────────────
     private static MemoryFunctionVoid<nint, string, float>? _setOrAddAttr;
     private bool _nativeFuncLoaded;
 
     // ─── State ───────────────────────────────────────────────────────────
-    private List<SkinEntry> _allSkins = new();
+    private List<SkinEntry> _allSkins = new();        // weapons + knives
+    private List<SkinEntry> _allGloves = new();       // gloves (separate application)
     private readonly Dictionary<ulong, PlayerSkinSelection> _playerSkins = new();
     private readonly Dictionary<ulong, PlayerMenuContext> _playerMenus = new();
     private ulong _nextItemId = 68000;
@@ -52,10 +49,10 @@ public class CS2AdminSkins : BasePlugin
     };
 
     // ─── Constants ───────────────────────────────────────────────────────
-    private const float FactoryNewWear = 0.001f; // Pristine Factory New
-    private const int StatTrakQuality = 9;       // EntityQuality for StatTrak items
+    private const float FactoryNewWear = 0.001f;
+    private const int StatTrakQuality = 9;
 
-    // ─── Weapon categories for the menu ──────────────────────────────────
+    // ─── Menu categories ─────────────────────────────────────────────────
     private static readonly Dictionary<string, string[]> WeaponSlots = new()
     {
         ["Rifles"] = new[] { "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer", "weapon_aug", "weapon_sg556", "weapon_famas", "weapon_galilar" },
@@ -79,7 +76,6 @@ public class CS2AdminSkins : BasePlugin
         ["weapon_m249"] = "M249", ["weapon_negev"] = "Negev",
     };
 
-    // Weapon name → defindex lookup
     private static readonly Dictionary<string, int> NameToDefindex = new()
     {
         ["weapon_deagle"] = 1, ["weapon_elite"] = 2, ["weapon_fiveseven"] = 3, ["weapon_glock"] = 4,
@@ -93,126 +89,150 @@ public class CS2AdminSkins : BasePlugin
         ["weapon_usp_silencer"] = 61, ["weapon_cz75a"] = 63, ["weapon_revolver"] = 64,
     };
 
+    // ─── Knife types ─────────────────────────────────────────────────────
+    private static readonly (int defindex, string displayName)[] KnifeTypes = new[]
+    {
+        (500, "Bayonet"),
+        (503, "Classic Knife"),
+        (505, "Flip Knife"),
+        (506, "Gut Knife"),
+        (507, "Karambit"),
+        (508, "M9 Bayonet"),
+        (509, "Huntsman Knife"),
+        (512, "Falchion Knife"),
+        (514, "Bowie Knife"),
+        (515, "Butterfly Knife"),
+        (516, "Shadow Daggers"),
+        (517, "Paracord Knife"),
+        (518, "Survival Knife"),
+        (519, "Ursus Knife"),
+        (520, "Navaja Knife"),
+        (521, "Nomad Knife"),
+        (522, "Stiletto Knife"),
+        (523, "Talon Knife"),
+        (525, "Skeleton Knife"),
+        (526, "Kukri Knife"),
+    };
+
+    // ─── Glove types ─────────────────────────────────────────────────────
+    private static readonly (int defindex, string displayName)[] GloveTypes = new[]
+    {
+        (5027, "Bloodhound Gloves"),
+        (5030, "Sport Gloves"),
+        (5031, "Driver Gloves"),
+        (5032, "Hand Wraps"),
+        (5033, "Moto Gloves"),
+        (5034, "Specialist Gloves"),
+        (5035, "Hydra Gloves"),
+        (4725, "Broken Fang Gloves"),
+    };
+
+    private static readonly HashSet<int> KnifeDefindexes = new(KnifeTypes.Select(k => k.defindex));
+    private static readonly HashSet<int> GloveDefindexes = new(GloveTypes.Select(g => g.defindex));
+
     // ─── Plugin Lifecycle ────────────────────────────────────────────────
 
     public override void Load(bool hotReload)
     {
         _playerSkinsPath = Path.Combine(ModuleDirectory, "player_skins.json");
 
-        // Step 1: Load native function
         try
         {
             _setOrAddAttr = new MemoryFunctionVoid<nint, string, float>(
                 GameData.GetSignature("CAttributeList_SetOrAddAttributeValueByName"));
             _nativeFuncLoaded = true;
-            Logger.LogInformation("[CS2AdminSkins] Native CAttributeList function: LOADED OK");
+            Logger.LogInformation("[CS2AdminSkins] Native function: LOADED");
         }
         catch (Exception ex)
         {
             _nativeFuncLoaded = false;
-            Logger.LogError("[CS2AdminSkins] FAILED to load native function: {Error}", ex.Message);
+            Logger.LogError("[CS2AdminSkins] FAILED native function: {Error}", ex.Message);
         }
 
-        // Step 2: Load skin database
         LoadSkinDatabase();
-
-        // Step 3: Load persisted player selections
+        LoadGloveDatabase();
         LoadPlayerSelections();
 
-        // Step 4: Register commands
         AddCommand("css_skins", "Open skin selection menu", OnSkinsCommand);
         AddCommand("css_s", "Skin menu quick select", OnSelectionCommand);
         AddCommandListener("say", OnSay);
         AddCommandListener("say_team", OnSay);
 
-        // Step 5: Register event handlers
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnect);
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
         RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
         RegisterListener<Listeners.OnEntityCreated>(OnEntityCreated);
 
-        // Step 6: Hook GiveNamedItem
         try
         {
             VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPost, HookMode.Post);
-            Logger.LogInformation("[CS2AdminSkins] GiveNamedItemFunc hook: REGISTERED");
+            Logger.LogInformation("[CS2AdminSkins] GiveNamedItemFunc hook: OK");
         }
         catch (Exception ex)
         {
-            Logger.LogError("[CS2AdminSkins] FAILED to hook GiveNamedItemFunc: {Error}", ex.Message);
+            Logger.LogError("[CS2AdminSkins] FAILED hook: {Error}", ex.Message);
         }
 
-        Logger.LogInformation("[CS2AdminSkins] v5.0 loaded — {Count} skins, native={Native}, {Players} saved players",
-            _allSkins.Count, _nativeFuncLoaded ? "YES" : "NO", _playerSkins.Count);
+        Logger.LogInformation("[CS2AdminSkins] v6.0 — {Skins} skins, {Gloves} gloves, {Players} saved players, native={N}",
+            _allSkins.Count, _allGloves.Count, _playerSkins.Count, _nativeFuncLoaded ? "YES" : "NO");
     }
 
     public override void Unload(bool hotReload)
     {
-        // Save all player data before unloading
         SaveAllPlayerSelections();
-        try { VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post); }
-        catch { }
+        try { VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post); } catch { }
     }
 
-    // ─── Skin Database Loading ───────────────────────────────────────────
+    // ─── Database Loading ────────────────────────────────────────────────
 
     private void LoadSkinDatabase()
     {
-        var jsonPath = Path.Combine(ModuleDirectory, "skins.json");
-        if (!File.Exists(jsonPath))
-        {
-            Logger.LogWarning("[CS2AdminSkins] skins.json not found at {Path}", jsonPath);
-            return;
-        }
-
+        var path = Path.Combine(ModuleDirectory, "skins.json");
+        if (!File.Exists(path)) { Logger.LogWarning("[CS2AdminSkins] skins.json not found"); return; }
         try
         {
-            var json = File.ReadAllText(jsonPath);
-            var skins = JsonSerializer.Deserialize<List<SkinEntry>>(json, JsonOpts);
-
-            if (skins != null && skins.Count > 0)
+            var skins = JsonSerializer.Deserialize<List<SkinEntry>>(File.ReadAllText(path), JsonOpts);
+            if (skins != null)
             {
                 _allSkins = skins.Where(s => s.Paint > 0).ToList();
-                Logger.LogInformation("[CS2AdminSkins] Loaded {Count} skins from skins.json", _allSkins.Count);
+                Logger.LogInformation("[CS2AdminSkins] Loaded {C} weapon/knife skins", _allSkins.Count);
             }
         }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[CS2AdminSkins] Failed to parse skins.json");
-        }
+        catch (Exception ex) { Logger.LogError(ex, "[CS2AdminSkins] Failed skins.json"); }
     }
 
-    // ─── Player Selection Persistence ────────────────────────────────────
+    private void LoadGloveDatabase()
+    {
+        var path = Path.Combine(ModuleDirectory, "gloves.json");
+        if (!File.Exists(path)) { Logger.LogWarning("[CS2AdminSkins] gloves.json not found"); return; }
+        try
+        {
+            var gloves = JsonSerializer.Deserialize<List<SkinEntry>>(File.ReadAllText(path), JsonOpts);
+            if (gloves != null)
+            {
+                _allGloves = gloves.Where(g => g.Paint > 0).ToList();
+                Logger.LogInformation("[CS2AdminSkins] Loaded {C} glove skins", _allGloves.Count);
+            }
+        }
+        catch (Exception ex) { Logger.LogError(ex, "[CS2AdminSkins] Failed gloves.json"); }
+    }
+
+    // ─── Persistence ─────────────────────────────────────────────────────
 
     private void LoadPlayerSelections()
     {
-        if (!File.Exists(_playerSkinsPath))
-        {
-            Logger.LogInformation("[CS2AdminSkins] No saved player selections found (first run)");
-            return;
-        }
-
+        if (!File.Exists(_playerSkinsPath)) return;
         try
         {
-            var json = File.ReadAllText(_playerSkinsPath);
-            var db = JsonSerializer.Deserialize<PlayerSkinsDatabase>(json, JsonOpts);
+            var db = JsonSerializer.Deserialize<PlayerSkinsDatabase>(File.ReadAllText(_playerSkinsPath), JsonOpts);
             if (db?.Players == null) return;
-
             foreach (var kvp in db.Players)
-            {
-                if (ulong.TryParse(kvp.Key, out var steamId))
-                {
-                    _playerSkins[steamId] = kvp.Value;
-                }
-            }
-
-            Logger.LogInformation("[CS2AdminSkins] Loaded selections for {Count} players", _playerSkins.Count);
+                if (ulong.TryParse(kvp.Key, out var id))
+                    _playerSkins[id] = kvp.Value;
+            Logger.LogInformation("[CS2AdminSkins] Loaded {C} player selections", _playerSkins.Count);
         }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[CS2AdminSkins] Failed to load player_skins.json");
-        }
+        catch (Exception ex) { Logger.LogError(ex, "[CS2AdminSkins] Failed player_skins.json"); }
     }
 
     private void SaveAllPlayerSelections()
@@ -221,21 +241,13 @@ public class CS2AdminSkins : BasePlugin
         {
             var db = new PlayerSkinsDatabase();
             foreach (var kvp in _playerSkins)
-            {
                 db.Players[kvp.Key.ToString()] = kvp.Value;
-            }
-
-            var json = JsonSerializer.Serialize(db, JsonOpts);
-            File.WriteAllText(_playerSkinsPath, json);
-            Logger.LogInformation("[CS2AdminSkins] Saved selections for {Count} players", _playerSkins.Count);
+            File.WriteAllText(_playerSkinsPath, JsonSerializer.Serialize(db, JsonOpts));
         }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[CS2AdminSkins] Failed to save player_skins.json");
-        }
+        catch (Exception ex) { Logger.LogError(ex, "[CS2AdminSkins] Save failed"); }
     }
 
-    // ─── Weapon Creation Hooks (THE KEY PART) ────────────────────────────
+    // ─── GiveNamedItem Hook — Weapons & Knives ──────────────────────────
 
     private HookResult OnGiveNamedItemPost(DynamicHook hook)
     {
@@ -243,26 +255,28 @@ public class CS2AdminSkins : BasePlugin
         {
             var itemServices = hook.GetParam<CCSPlayer_ItemServices>(0);
             var weapon = hook.GetReturn<CBasePlayerWeapon>();
-
-            if (!weapon.DesignerName.Contains("weapon"))
-                return HookResult.Continue;
+            if (!weapon.DesignerName.Contains("weapon")) return HookResult.Continue;
 
             var player = GetPlayerFromItemServices(itemServices);
-            if (player != null)
-                ApplySkinToWeapon(player, weapon);
+            if (player == null) return HookResult.Continue;
+
+            bool isKnife = weapon.DesignerName.Contains("knife") || weapon.DesignerName.Contains("bayonet");
+
+            if (isKnife)
+                ApplyKnifeSkin(player, weapon);
+            else
+                ApplyWeaponSkin(player, weapon);
         }
         catch (Exception ex)
         {
-            Logger.LogWarning("[CS2AdminSkins] GiveNamedItemPost error: {Error}", ex.Message);
+            Logger.LogWarning("[CS2AdminSkins] GiveNamedItemPost: {E}", ex.Message);
         }
-
         return HookResult.Continue;
     }
 
     private void OnEntityCreated(CEntityInstance entity)
     {
-        if (!entity.DesignerName.Contains("weapon"))
-            return;
+        if (!entity.DesignerName.Contains("weapon")) return;
 
         Server.NextWorldUpdate(() =>
         {
@@ -272,180 +286,232 @@ public class CS2AdminSkins : BasePlugin
                 if (!weapon.IsValid) return;
 
                 CCSPlayerController? player = null;
-
                 if (weapon.OriginalOwnerXuidLow > 0)
                 {
-                    var steamid = new SteamID(weapon.OriginalOwnerXuidLow);
-                    if (steamid.IsValid())
-                        player = _connectedPlayers.FirstOrDefault(p => p.IsValid && p.SteamID == steamid.SteamId64);
+                    var sid = new SteamID(weapon.OriginalOwnerXuidLow);
+                    if (sid.IsValid())
+                        player = _connectedPlayers.FirstOrDefault(p => p.IsValid && p.SteamID == sid.SteamId64);
                 }
+                if (player == null || !player.IsValid || player.IsBot) return;
 
-                if (player == null) return;
-                if (!player.IsValid || player.IsBot) return;
-
-                ApplySkinToWeapon(player, weapon);
+                bool isKnife = weapon.DesignerName.Contains("knife") || weapon.DesignerName.Contains("bayonet");
+                if (isKnife)
+                    ApplyKnifeSkin(player, weapon);
+                else
+                    ApplyWeaponSkin(player, weapon);
             }
             catch { }
         });
     }
 
-    // ─── Core Skin Application ───────────────────────────────────────────
+    // ─── Weapon Skin Application ─────────────────────────────────────────
 
-    /// <summary>
-    /// Apply the player's selected skin as StatTrak Factory New.
-    /// Uses CAttributeList_SetOrAddAttributeValueByName — the native engine function.
-    /// </summary>
-    private void ApplySkinToWeapon(CCSPlayerController player, CBasePlayerWeapon weapon)
+    private void ApplyWeaponSkin(CCSPlayerController player, CBasePlayerWeapon weapon)
     {
         if (!_nativeFuncLoaded || _setOrAddAttr == null) return;
         if (!_playerSkins.TryGetValue(player.SteamID, out var sel)) return;
 
-        int weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+        int defIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+        if (!sel.WeaponPaints.TryGetValue(defIndex, out var paintKit) || paintKit <= 0) return;
 
-        if (!sel.WeaponPaints.TryGetValue(weaponDefIndex, out var paintKit) || paintKit <= 0)
-            return;
+        bool isLegacy = sel.WeaponLegacy.GetValueOrDefault(defIndex, false);
+        int stCount = sel.StatTrakCounts.GetValueOrDefault(defIndex, 0);
 
-        bool isLegacy = sel.WeaponLegacy.GetValueOrDefault(weaponDefIndex, false);
-        int statTrakCount = sel.StatTrakCounts.GetValueOrDefault(weaponDefIndex, 0);
+        ApplyPaintToItem(weapon, player, paintKit, stCount, isLegacy, StatTrakQuality);
+    }
 
+    // ─── Knife Skin Application ──────────────────────────────────────────
+
+    private void ApplyKnifeSkin(CCSPlayerController player, CBasePlayerWeapon weapon)
+    {
+        if (!_nativeFuncLoaded || _setOrAddAttr == null) return;
+        if (!_playerSkins.TryGetValue(player.SteamID, out var sel)) return;
+
+        int selectedKnife = sel.SelectedKnife;
+        if (selectedKnife <= 0) return; // no custom knife
+
+        int currentDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+
+        // Change knife subclass if needed
+        if (currentDefIndex != selectedKnife)
+        {
+            try
+            {
+                weapon.AcceptInput("ChangeSubclass", value: selectedKnife.ToString());
+                weapon.AttributeManager.Item.ItemDefinitionIndex = (ushort)selectedKnife;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("[CS2AdminSkins] SubclassChange failed: {E}", ex.Message);
+            }
+        }
+
+        // Apply paint if selected for this knife type
+        if (!sel.WeaponPaints.TryGetValue(selectedKnife, out var paintKit) || paintKit <= 0) return;
+
+        bool isLegacy = sel.WeaponLegacy.GetValueOrDefault(selectedKnife, false);
+        int stCount = sel.StatTrakCounts.GetValueOrDefault(selectedKnife, 0);
+
+        // Knives use EntityQuality 3 for the star icon, but we combine with StatTrak
+        ApplyPaintToItem(weapon, player, paintKit, stCount, isLegacy, StatTrakQuality);
+    }
+
+    // ─── Glove Application (called on spawn) ────────────────────────────
+
+    private void ApplyGloves(CCSPlayerController player)
+    {
+        if (!_nativeFuncLoaded || _setOrAddAttr == null) return;
+        if (!_playerSkins.TryGetValue(player.SteamID, out var sel)) return;
+        if (sel.SelectedGlove <= 0) return;
+
+        if (!sel.WeaponPaints.TryGetValue(sel.SelectedGlove, out var paintKit) || paintKit <= 0) return;
+
+        if (!player.IsValid || !player.PawnIsAlive) return;
+        var pawn = player.PlayerPawn?.Value;
+        if (pawn == null || !pawn.IsValid) return;
+
+        // Force glove refresh by swapping model
+        try
+        {
+            var model = pawn.CBodyComponent?.SceneNode?.GetSkeletonInstance()?.ModelState.ModelName ?? "";
+            if (!string.IsNullOrEmpty(model))
+            {
+                pawn.SetModel("characters/models/tm_jumpsuit/tm_jumpsuit_varianta.vmdl");
+                pawn.SetModel(model);
+            }
+        }
+        catch { }
+
+        var item = pawn.EconGloves;
+        item.NetworkedDynamicAttributes.Attributes.RemoveAll();
+        item.AttributeList.Attributes.RemoveAll();
+
+        // Apply glove after a short delay (required for model swap to take effect)
+        AddTimer(0.08f, () =>
+        {
+            try
+            {
+                if (!player.IsValid || !player.PawnIsAlive) return;
+
+                item.ItemDefinitionIndex = (ushort)sel.SelectedGlove;
+
+                var itemId = _nextItemId++;
+                item.ItemID = itemId;
+                item.ItemIDLow = (uint)(itemId & 0xFFFFFFFF);
+                item.ItemIDHigh = (uint)(itemId >> 32);
+
+                item.NetworkedDynamicAttributes.Attributes.RemoveAll();
+                _setOrAddAttr!.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture prefab", paintKit);
+                _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture seed", 0);
+                _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture wear", FactoryNewWear);
+
+                item.AttributeList.Attributes.RemoveAll();
+                _setOrAddAttr.Invoke(item.AttributeList.Handle, "set item texture prefab", paintKit);
+                _setOrAddAttr.Invoke(item.AttributeList.Handle, "set item texture seed", 0);
+                _setOrAddAttr.Invoke(item.AttributeList.Handle, "set item texture wear", FactoryNewWear);
+
+                item.Initialized = true;
+
+                // Show custom gloves instead of default
+                pawn.AcceptInput("SetBodygroup", value: "default_gloves,1");
+
+                Logger.LogInformation("[CS2AdminSkins] Applied glove {Glove} paint {Paint} for {Player}",
+                    sel.SelectedGlove, paintKit, player.PlayerName);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "[CS2AdminSkins] Glove apply failed");
+            }
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+    }
+
+    // ─── Shared Paint Application ────────────────────────────────────────
+
+    private void ApplyPaintToItem(CBasePlayerWeapon weapon, CCSPlayerController player,
+        int paintKit, int statTrakCount, bool isLegacy, int entityQuality)
+    {
         try
         {
             var item = weapon.AttributeManager.Item;
 
-            // Clear existing attributes
             item.AttributeList.Attributes.RemoveAll();
             item.NetworkedDynamicAttributes.Attributes.RemoveAll();
 
-            // Set unique item ID
             var itemId = _nextItemId++;
             item.ItemID = itemId;
             item.ItemIDLow = (uint)(itemId & 0xFFFFFFFF);
             item.ItemIDHigh = (uint)(itemId >> 32);
-
-            // Set account ID to player
             item.AccountID = (uint)player.SteamID;
+            item.EntityQuality = entityQuality;
 
-            // StatTrak quality (9 = StatTrak)
-            item.EntityQuality = StatTrakQuality;
-
-            // Set fallback values — Factory New + StatTrak
             weapon.FallbackPaintKit = paintKit;
             weapon.FallbackSeed = 0;
             weapon.FallbackWear = FactoryNewWear;
             weapon.FallbackStatTrak = statTrakCount;
 
-            // ── Set paint attributes via native engine function ──
-            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                "set item texture prefab", paintKit);
-            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                "set item texture seed", 0);
-            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                "set item texture wear", FactoryNewWear);
+            _setOrAddAttr!.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture prefab", paintKit);
+            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture seed", 0);
+            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture wear", FactoryNewWear);
+            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "kill eater", ViewAsFloat((uint)statTrakCount));
+            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "kill eater score type", 0);
 
-            // ── Set StatTrak (kill eater) attributes ──
-            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                "kill eater", ViewAsFloat((uint)statTrakCount));
-            _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                "kill eater score type", 0);
+            _setOrAddAttr.Invoke(item.AttributeList.Handle, "set item texture prefab", paintKit);
+            _setOrAddAttr.Invoke(item.AttributeList.Handle, "set item texture seed", 0);
+            _setOrAddAttr.Invoke(item.AttributeList.Handle, "set item texture wear", FactoryNewWear);
+            _setOrAddAttr.Invoke(item.AttributeList.Handle, "kill eater", ViewAsFloat((uint)statTrakCount));
+            _setOrAddAttr.Invoke(item.AttributeList.Handle, "kill eater score type", 0);
 
-            _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                "set item texture prefab", paintKit);
-            _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                "set item texture seed", 0);
-            _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                "set item texture wear", FactoryNewWear);
-
-            _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                "kill eater", ViewAsFloat((uint)statTrakCount));
-            _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                "kill eater score type", 0);
-
-            // Handle bodygroup for legacy vs new model skins
-            try
-            {
-                weapon.AcceptInput("SetBodygroup", value: $"body,{(isLegacy ? 1 : 0)}");
-            }
-            catch { }
-
-            Logger.LogInformation(
-                "[CS2AdminSkins] Applied ST FN paint {Paint} to defindex {Def} for {Player} (kills={Kills}, legacy={Legacy})",
-                paintKit, weaponDefIndex, player.PlayerName, statTrakCount, isLegacy);
+            try { weapon.AcceptInput("SetBodygroup", value: $"body,{(isLegacy ? 1 : 0)}"); } catch { }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[CS2AdminSkins] Failed to apply paint {Paint} to weapon defindex {Def}",
-                paintKit, weaponDefIndex);
+            Logger.LogError(ex, "[CS2AdminSkins] ApplyPaint failed for {Paint}", paintKit);
         }
     }
 
     // ─── StatTrak Kill Tracking ──────────────────────────────────────────
 
-    /// <summary>
-    /// When a player kills someone, increment StatTrak on the active weapon
-    /// and update the counter visually in real-time.
-    /// </summary>
     [GameEventHandler]
     private HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
     {
         var attacker = @event.Attacker;
         var victim = @event.Userid;
+        if (attacker == null || !attacker.IsValid || attacker.IsBot) return HookResult.Continue;
+        if (victim == null || !victim.IsValid || victim == attacker) return HookResult.Continue;
+        if (!_playerSkins.TryGetValue(attacker.SteamID, out var sel)) return HookResult.Continue;
 
-        // Only count real kills (not self-kills, not world kills)
-        if (attacker == null || !attacker.IsValid || attacker.IsBot)
-            return HookResult.Continue;
-        if (victim == null || !victim.IsValid || victim == attacker)
-            return HookResult.Continue;
-
-        if (!_playerSkins.TryGetValue(attacker.SteamID, out var sel))
-            return HookResult.Continue;
-
-        // Get the active weapon
         var activeWeapon = attacker.PlayerPawn?.Value?.WeaponServices?.ActiveWeapon?.Value;
         if (activeWeapon == null || !activeWeapon.IsValid) return HookResult.Continue;
 
-        int weaponDefIndex = activeWeapon.AttributeManager.Item.ItemDefinitionIndex;
+        int defIndex = activeWeapon.AttributeManager.Item.ItemDefinitionIndex;
 
-        // Only track if this weapon has a custom skin
-        if (!sel.WeaponPaints.TryGetValue(weaponDefIndex, out var paintKit) || paintKit <= 0)
+        // For knives, use the selected knife defindex
+        bool isKnife = activeWeapon.DesignerName.Contains("knife") || activeWeapon.DesignerName.Contains("bayonet");
+        if (isKnife && sel.SelectedKnife > 0)
+            defIndex = sel.SelectedKnife;
+
+        if (!sel.WeaponPaints.TryGetValue(defIndex, out var paint) || paint <= 0)
             return HookResult.Continue;
 
-        // Increment the kill counter
-        var newCount = sel.StatTrakCounts.GetValueOrDefault(weaponDefIndex, 0) + 1;
-        sel.StatTrakCounts[weaponDefIndex] = newCount;
+        var newCount = sel.StatTrakCounts.GetValueOrDefault(defIndex, 0) + 1;
+        sel.StatTrakCounts[defIndex] = newCount;
 
-        // Update the weapon's StatTrak display in real-time
         try
         {
             activeWeapon.FallbackStatTrak = newCount;
-
             if (_nativeFuncLoaded && _setOrAddAttr != null)
             {
                 var item = activeWeapon.AttributeManager.Item;
-                _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle,
-                    "kill eater", ViewAsFloat((uint)newCount));
-                _setOrAddAttr.Invoke(item.AttributeList.Handle,
-                    "kill eater", ViewAsFloat((uint)newCount));
+                _setOrAddAttr.Invoke(item.NetworkedDynamicAttributes.Handle, "kill eater", ViewAsFloat((uint)newCount));
+                _setOrAddAttr.Invoke(item.AttributeList.Handle, "kill eater", ViewAsFloat((uint)newCount));
             }
-
-            Logger.LogInformation("[CS2AdminSkins] StatTrak: {Player} kill #{Count} with defindex {Def}",
-                attacker.PlayerName, newCount, weaponDefIndex);
         }
-        catch (Exception ex)
-        {
-            Logger.LogWarning("[CS2AdminSkins] Failed to update StatTrak: {Error}", ex.Message);
-        }
+        catch { }
 
         return HookResult.Continue;
     }
 
-    /// <summary>
-    /// Reinterpret an unsigned int as float (bit-for-bit), as required by the
-    /// attribute system for integer-type attributes stored in float fields.
-    /// </summary>
-    private static float ViewAsFloat(uint value)
-    {
-        return BitConverter.Int32BitsToSingle((int)value);
-    }
+    private static float ViewAsFloat(uint value) => BitConverter.Int32BitsToSingle((int)value);
 
     // ─── Weapon Refresh ──────────────────────────────────────────────────
 
@@ -456,35 +522,29 @@ public class CS2AdminSkins : BasePlugin
         if (pawn?.WeaponServices?.MyWeapons == null || pawn.ItemServices == null) return;
         if (player.Team is CsTeam.None or CsTeam.Spectator) return;
 
-        var weaponsToRestore = new List<(string defName, int clip, int reserve)>();
+        var toRestore = new List<(string defName, int clip, int reserve)>();
         bool hadKnife = false;
 
         foreach (var handle in pawn.WeaponServices.MyWeapons)
         {
-            var weapon = handle.Value;
-            if (weapon == null || !weapon.IsValid || weapon.Entity == null) continue;
-            if (!weapon.DesignerName.Contains("weapon_")) continue;
-
+            var w = handle.Value;
+            if (w == null || !w.IsValid || w.Entity == null || !w.DesignerName.Contains("weapon_")) continue;
             try
             {
-                var gun = weapon.As<CCSWeaponBaseGun>();
+                var gun = w.As<CCSWeaponBaseGun>();
                 if (gun.VData == null) continue;
-
-                if (weapon.DesignerName.Contains("knife") || weapon.DesignerName.Contains("bayonet"))
+                if (w.DesignerName.Contains("knife") || w.DesignerName.Contains("bayonet"))
                 {
                     hadKnife = true;
-                    weapon.AddEntityIOEvent("Kill", weapon, null, "", 0.1f);
+                    w.AddEntityIOEvent("Kill", w, null, "", 0.1f);
                 }
                 else if (gun.VData.GearSlot is gear_slot_t.GEAR_SLOT_RIFLE or gear_slot_t.GEAR_SLOT_PISTOL)
                 {
-                    weaponsToRestore.Add((weapon.DesignerName, weapon.Clip1, weapon.ReserveAmmo[0]));
-                    weapon.AddEntityIOEvent("Kill", weapon, null, "", 0.1f);
+                    toRestore.Add((w.DesignerName, w.Clip1, w.ReserveAmmo[0]));
+                    w.AddEntityIOEvent("Kill", w, null, "", 0.1f);
                 }
             }
-            catch (Exception ex)
-            {
-                Logger.LogWarning("[CS2AdminSkins] Error processing weapon: {Error}", ex.Message);
-            }
+            catch { }
         }
 
         AddTimer(0.25f, () =>
@@ -497,26 +557,18 @@ public class CS2AdminSkins : BasePlugin
                 player.ExecuteClientCommand("slot3");
             }
 
-            foreach (var (defName, clip, reserve) in weaponsToRestore)
+            foreach (var (defName, clip, reserve) in toRestore)
             {
-                var newWeapon = new CBasePlayerWeapon(player.GiveNamedItem(defName));
+                var nw = new CBasePlayerWeapon(player.GiveNamedItem(defName));
                 Server.NextFrame(() =>
                 {
-                    try
-                    {
-                        if (newWeapon.IsValid)
-                        {
-                            newWeapon.Clip1 = clip;
-                            newWeapon.ReserveAmmo[0] = reserve;
-                        }
-                    }
-                    catch { }
+                    try { if (nw.IsValid) { nw.Clip1 = clip; nw.ReserveAmmo[0] = reserve; } } catch { }
                 });
             }
         }, TimerFlags.STOP_ON_MAPCHANGE);
     }
 
-    // ─── Player Event Handlers ───────────────────────────────────────────
+    // ─── Player Events ───────────────────────────────────────────────────
 
     [GameEventHandler]
     private HookResult OnPlayerConnect(EventPlayerConnectFull @event, GameEventInfo info)
@@ -525,14 +577,10 @@ public class CS2AdminSkins : BasePlugin
         if (player != null && player.IsValid && !player.IsBot)
         {
             _connectedPlayers.Add(player);
-
-            // Log if returning player has saved skins
             if (_playerSkins.ContainsKey(player.SteamID))
             {
                 var sel = _playerSkins[player.SteamID];
-                Logger.LogInformation("[CS2AdminSkins] Returning player {Name} — {Count} saved skins loaded",
-                    player.PlayerName, sel.WeaponPaints.Count);
-                player.PrintToChat($" \x04[Skins]\x01 Welcome back! Your \x10{sel.WeaponPaints.Count}\x01 saved skin(s) will auto-apply.");
+                player.PrintToChat($" \x04[Skins]\x01 Welcome back! \x10{sel.WeaponPaints.Count}\x01 saved skin(s) will auto-apply.");
             }
         }
         return HookResult.Continue;
@@ -546,8 +594,6 @@ public class CS2AdminSkins : BasePlugin
         {
             _connectedPlayers.Remove(player);
             _playerMenus.Remove(player.SteamID);
-
-            // Save this player's data on disconnect
             if (_playerSkins.ContainsKey(player.SteamID))
                 SaveAllPlayerSelections();
         }
@@ -557,7 +603,16 @@ public class CS2AdminSkins : BasePlugin
     [GameEventHandler]
     private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
     {
-        // Skins are applied via the GiveNamedItemFunc hook automatically.
+        var player = @event.Userid;
+        if (player == null || !player.IsValid || player.IsBot) return HookResult.Continue;
+
+        // Apply gloves on spawn (needs short delay for pawn to be ready)
+        Server.NextFrame(() =>
+        {
+            if (player.IsValid && player.PawnIsAlive)
+                ApplyGloves(player);
+        });
+
         return HookResult.Continue;
     }
 
@@ -566,13 +621,12 @@ public class CS2AdminSkins : BasePlugin
     private static CCSPlayerController? GetPlayerFromItemServices(CCSPlayer_ItemServices itemServices)
     {
         var pawn = itemServices.Pawn.Value;
-        if (pawn == null || !pawn.IsValid || !pawn.Controller.IsValid || pawn.Controller.Value == null)
-            return null;
-        var player = new CCSPlayerController(pawn.Controller.Value.Handle);
-        return player.IsValid && !player.IsBot ? player : null;
+        if (pawn == null || !pawn.IsValid || !pawn.Controller.IsValid || pawn.Controller.Value == null) return null;
+        var p = new CCSPlayerController(pawn.Controller.Value.Handle);
+        return p.IsValid && !p.IsBot ? p : null;
     }
 
-    // ─── Command Handlers ────────────────────────────────────────────────
+    // ─── Commands ────────────────────────────────────────────────────────
 
     private void OnSkinsCommand(CCSPlayerController? player, CommandInfo info)
     {
@@ -586,7 +640,7 @@ public class CS2AdminSkins : BasePlugin
         var arg = info.ArgCount > 1 ? info.GetArg(1)?.Trim() : null;
         if (string.IsNullOrEmpty(arg) || !int.TryParse(arg, out var choice))
         {
-            player.PrintToConsole("[Skins] Usage: css_s <number>  |  Type css_skins to reopen");
+            player.PrintToConsole("[Skins] Usage: css_s <number>");
             return;
         }
         HandleMenuChoice(player, choice);
@@ -607,7 +661,7 @@ public class CS2AdminSkins : BasePlugin
 
     // ─── Console Menu ────────────────────────────────────────────────────
 
-    private PlayerMenuContext GetOrCreateContext(ulong steamId)
+    private PlayerMenuContext GetCtx(ulong steamId)
     {
         if (!_playerMenus.TryGetValue(steamId, out var ctx))
         {
@@ -621,47 +675,44 @@ public class CS2AdminSkins : BasePlugin
     {
         if (!_nativeFuncLoaded)
         {
-            player.PrintToChat(" \x02[Skins] ERROR: Native function not loaded. Skins cannot work.");
-            player.PrintToConsole("[Skins] ERROR: CAttributeList_SetOrAddAttributeValueByName failed to load.");
+            player.PrintToChat(" \x02[Skins] ERROR: Native function not loaded.");
             return;
         }
 
-        var ctx = GetOrCreateContext(player.SteamID);
+        var ctx = GetCtx(player.SteamID);
         ctx.State = MenuState.WeaponSelect;
         ctx.SelectedWeaponName = "";
         ctx.SelectedWeaponDefindex = 0;
         ctx.FilteredSkins.Clear();
         ctx.SubMenuWeapons = null;
 
-        player.PrintToChat(" \x04[Skins]\x01 Menu opened in \x10CONSOLE\x01. Press \x04~\x01 to open console.");
-        player.PrintToChat(" \x04[Skins]\x01 Type \x10css_s <number>\x01 in console to navigate.");
-        player.PrintToChat(" \x04[Skins]\x01 All skins are \x10StatTrak Factory New\x01!");
+        var saved = _playerSkins.TryGetValue(player.SteamID, out var sel) ? sel.WeaponPaints.Count : 0;
 
-        // Show current skin count for this player
-        var savedCount = _playerSkins.TryGetValue(player.SteamID, out var sel) ? sel.WeaponPaints.Count : 0;
+        player.PrintToChat(" \x04[Skins]\x01 Menu in \x10CONSOLE\x01 (~). Type \x10css_s <number>\x01 to navigate.");
 
         player.PrintToConsole("");
-        player.PrintToConsole("======================================");
-        player.PrintToConsole("    CS2 ADMIN SKIN SELECTOR v5");
-        player.PrintToConsole("    StatTrak | Factory New");
-        player.PrintToConsole($"    Saved skins: {savedCount}");
-        player.PrintToConsole("======================================");
+        player.PrintToConsole("==========================================");
+        player.PrintToConsole("    CS2 ADMIN SKINS v6 — ST | FN");
+        player.PrintToConsole($"    Saved: {saved} skins");
+        player.PrintToConsole("==========================================");
+
         var slots = WeaponSlots.Keys.ToArray();
         for (int i = 0; i < slots.Length; i++)
             player.PrintToConsole($"  [{i + 1}]  {slots[i]}");
+
+        player.PrintToConsole($"  [{slots.Length + 1}]  Knives");
+        player.PrintToConsole($"  [{slots.Length + 2}]  Gloves");
         player.PrintToConsole("  [0]  Close");
-        player.PrintToConsole("--------------------------------------");
+        player.PrintToConsole("------------------------------------------");
         player.PrintToConsole("  Type:  css_s <number>");
-        player.PrintToConsole("======================================");
+        player.PrintToConsole("==========================================");
     }
 
     private void ShowWeaponSubMenu(CCSPlayerController player, string slotName, string[] weapons)
     {
-        var ctx = GetOrCreateContext(player.SteamID);
+        var ctx = GetCtx(player.SteamID);
         ctx.State = MenuState.WeaponSubSelect;
         ctx.SubMenuWeapons = weapons;
-
-        // Get player's current selections to show equipped skins
         _playerSkins.TryGetValue(player.SteamID, out var sel);
 
         player.PrintToConsole("");
@@ -669,39 +720,87 @@ public class CS2AdminSkins : BasePlugin
         for (int i = 0; i < weapons.Length; i++)
         {
             var name = WeaponDisplayNames.GetValueOrDefault(weapons[i], weapons[i]);
-            var defindex = NameToDefindex.GetValueOrDefault(weapons[i], 0);
-            var count = _allSkins.Count(s => s.WeaponDefindex == defindex);
-
-            // Show currently equipped skin if any
+            var def = NameToDefindex.GetValueOrDefault(weapons[i], 0);
+            var count = _allSkins.Count(s => s.WeaponDefindex == def);
             var equipped = "";
-            if (sel != null && sel.WeaponPaints.TryGetValue(defindex, out var paintId))
+            if (sel != null && sel.WeaponPaints.TryGetValue(def, out var pid))
             {
-                var skinName = _allSkins.FirstOrDefault(s => s.WeaponDefindex == defindex && s.Paint == paintId)?.PaintName;
-                var kills = sel.StatTrakCounts.GetValueOrDefault(defindex, 0);
-                if (skinName != null)
-                    equipped = $"  [ST: {kills}] {skinName}";
+                var sn = _allSkins.FirstOrDefault(s => s.WeaponDefindex == def && s.Paint == pid)?.PaintName;
+                var kills = sel.StatTrakCounts.GetValueOrDefault(def, 0);
+                if (sn != null) equipped = $"  [ST:{kills}] {sn}";
             }
-
             player.PrintToConsole($"  [{i + 1}]  {name}  ({count} skins){equipped}");
         }
         player.PrintToConsole("  [0]  Back");
-        player.PrintToConsole("--------------------------------------");
+        player.PrintToConsole("  Type:  css_s <number>");
+    }
+
+    private void ShowKnifeTypeMenu(CCSPlayerController player)
+    {
+        var ctx = GetCtx(player.SteamID);
+        ctx.State = MenuState.CategorySelect;
+        ctx.SelectedWeaponName = "__knives__";
+        _playerSkins.TryGetValue(player.SteamID, out var sel);
+
+        player.PrintToConsole("");
+        player.PrintToConsole("======= KNIVES =======");
+        for (int i = 0; i < KnifeTypes.Length; i++)
+        {
+            var (def, name) = KnifeTypes[i];
+            var count = _allSkins.Count(s => s.WeaponDefindex == def);
+            var equipped = sel?.SelectedKnife == def ? " [EQUIPPED]" : "";
+            player.PrintToConsole($"  [{i + 1}]  {name}  ({count} skins){equipped}");
+        }
+        player.PrintToConsole("  [0]  Back");
+        player.PrintToConsole("  Type:  css_s <number>");
+    }
+
+    private void ShowGloveTypeMenu(CCSPlayerController player)
+    {
+        var ctx = GetCtx(player.SteamID);
+        ctx.State = MenuState.CategorySelect;
+        ctx.SelectedWeaponName = "__gloves__";
+        _playerSkins.TryGetValue(player.SteamID, out var sel);
+
+        player.PrintToConsole("");
+        player.PrintToConsole("======= GLOVES =======");
+        for (int i = 0; i < GloveTypes.Length; i++)
+        {
+            var (def, name) = GloveTypes[i];
+            var count = _allGloves.Count(g => g.WeaponDefindex == def);
+            var equipped = sel?.SelectedGlove == def ? " [EQUIPPED]" : "";
+            player.PrintToConsole($"  [{i + 1}]  {name}  ({count} skins){equipped}");
+        }
+        player.PrintToConsole("  [0]  Back");
         player.PrintToConsole("  Type:  css_s <number>");
     }
 
     private void ShowSkinPage(CCSPlayerController player)
     {
-        var ctx = GetOrCreateContext(player.SteamID);
+        var ctx = GetCtx(player.SteamID);
         ctx.State = MenuState.SkinPage;
-        var start = ctx.CurrentPage * PlayerMenuContext.PageSize;
-        var skins = ctx.FilteredSkins.Skip(start).Take(PlayerMenuContext.PageSize).ToList();
+        var pageSize = PlayerMenuContext.PageSize;
+        var start = ctx.CurrentPage * pageSize;
+        var skins = ctx.FilteredSkins.Skip(start).Take(pageSize).ToList();
         if (skins.Count == 0 && ctx.CurrentPage > 0) { ctx.CurrentPage = 0; ShowSkinPage(player); return; }
 
-        var weaponName = WeaponDisplayNames.GetValueOrDefault(ctx.SelectedWeaponName, ctx.SelectedWeaponName);
-        var totalPages = (int)Math.Ceiling(ctx.FilteredSkins.Count / (double)PlayerMenuContext.PageSize);
+        var weaponName = ctx.SelectedWeaponName;
+        // Resolve display name
+        if (WeaponDisplayNames.TryGetValue(weaponName, out var dn))
+            weaponName = dn;
+        else
+        {
+            // Check knife/glove names
+            var kn = KnifeTypes.FirstOrDefault(k => k.defindex == ctx.SelectedWeaponDefindex);
+            if (kn.displayName != null) weaponName = kn.displayName;
+            var gn = GloveTypes.FirstOrDefault(g => g.defindex == ctx.SelectedWeaponDefindex);
+            if (gn.displayName != null) weaponName = gn.displayName;
+        }
+
+        var totalPages = (int)Math.Ceiling(ctx.FilteredSkins.Count / (double)pageSize);
 
         player.PrintToConsole("");
-        player.PrintToConsole($"======= {weaponName} SKINS (StatTrak FN) =======");
+        player.PrintToConsole($"======= {weaponName} — StatTrak FN =======");
         player.PrintToConsole($"  Page {ctx.CurrentPage + 1}/{totalPages}  ({ctx.FilteredSkins.Count} total)");
         player.PrintToConsole("");
         for (int i = 0; i < skins.Count; i++)
@@ -711,9 +810,8 @@ public class CS2AdminSkins : BasePlugin
         }
         player.PrintToConsole("");
         if (ctx.CurrentPage + 1 < totalPages)
-            player.PrintToConsole("  [9]  Next page  >>>");
+            player.PrintToConsole($"  [{pageSize + 1}]  >>> Next page >>>");
         player.PrintToConsole("  [0]  Back");
-        player.PrintToConsole("--------------------------------------");
         player.PrintToConsole("  Type:  css_s <number>");
     }
 
@@ -727,62 +825,103 @@ public class CS2AdminSkins : BasePlugin
             return;
         }
 
+        var pageSize = PlayerMenuContext.PageSize;
+
+        // ── Back (0) ──
         if (choice == 0)
         {
             switch (ctx.State)
             {
-                case MenuState.WeaponSubSelect: ShowMainMenu(player); return;
+                case MenuState.WeaponSubSelect:
+                case MenuState.CategorySelect:
+                    ShowMainMenu(player); return;
                 case MenuState.SkinPage:
+                    // Go back to the right submenu
+                    if (ctx.SelectedWeaponName == "__knives__") { ShowKnifeTypeMenu(player); return; }
+                    if (ctx.SelectedWeaponName == "__gloves__") { ShowGloveTypeMenu(player); return; }
                     if (ctx.SubMenuWeapons != null)
                     {
-                        var slotName = WeaponSlots.FirstOrDefault(kv => kv.Value == ctx.SubMenuWeapons).Key ?? "Weapons";
-                        ShowWeaponSubMenu(player, slotName, ctx.SubMenuWeapons);
+                        var sn = WeaponSlots.FirstOrDefault(kv => kv.Value == ctx.SubMenuWeapons).Key ?? "Weapons";
+                        ShowWeaponSubMenu(player, sn, ctx.SubMenuWeapons);
                     }
                     else ShowMainMenu(player);
                     return;
-                default: CloseMenu(player); player.PrintToConsole("[Skins] Menu closed."); return;
+                default: CloseMenu(player); return;
             }
         }
 
-        if (choice == 9 && ctx.State == MenuState.SkinPage)
+        // ── Next page ──
+        if (choice == pageSize + 1 && ctx.State == MenuState.SkinPage)
         {
-            var totalPages = (int)Math.Ceiling(ctx.FilteredSkins.Count / (double)PlayerMenuContext.PageSize);
+            var totalPages = (int)Math.Ceiling(ctx.FilteredSkins.Count / (double)pageSize);
             if (ctx.CurrentPage + 1 < totalPages) { ctx.CurrentPage++; ShowSkinPage(player); }
-            else player.PrintToConsole("[Skins] Last page.");
+            else player.PrintToConsole("[Skins] Already on last page.");
             return;
         }
 
         switch (ctx.State)
         {
+            // ── Main menu ──
             case MenuState.WeaponSelect:
                 var slots = WeaponSlots.Keys.ToArray();
-                if (choice < 1 || choice > slots.Length) break;
-                ShowWeaponSubMenu(player, slots[choice - 1], WeaponSlots[slots[choice - 1]]);
+                if (choice >= 1 && choice <= slots.Length)
+                {
+                    ShowWeaponSubMenu(player, slots[choice - 1], WeaponSlots[slots[choice - 1]]);
+                }
+                else if (choice == slots.Length + 1)
+                {
+                    ShowKnifeTypeMenu(player);
+                }
+                else if (choice == slots.Length + 2)
+                {
+                    ShowGloveTypeMenu(player);
+                }
                 break;
 
+            // ── Weapon sub-menu ──
             case MenuState.WeaponSubSelect:
                 if (ctx.SubMenuWeapons == null) break;
                 if (choice < 1 || choice > ctx.SubMenuWeapons.Length) break;
-                var weaponName = ctx.SubMenuWeapons[choice - 1];
-                var defindex = NameToDefindex.GetValueOrDefault(weaponName, 0);
-                ctx.SelectedWeaponName = weaponName;
-                ctx.SelectedWeaponDefindex = defindex;
-                ctx.FilteredSkins = _allSkins
-                    .Where(s => s.WeaponDefindex == defindex)
-                    .OrderBy(s => s.PaintName)
-                    .ToList();
-                if (ctx.FilteredSkins.Count == 0)
-                {
-                    player.PrintToConsole($"[Skins] No skins found for {WeaponDisplayNames.GetValueOrDefault(weaponName, weaponName)}.");
-                    return;
-                }
+                var wn = ctx.SubMenuWeapons[choice - 1];
+                var def = NameToDefindex.GetValueOrDefault(wn, 0);
+                ctx.SelectedWeaponName = wn;
+                ctx.SelectedWeaponDefindex = def;
+                ctx.FilteredSkins = _allSkins.Where(s => s.WeaponDefindex == def).OrderBy(s => s.PaintName).ToList();
+                if (ctx.FilteredSkins.Count == 0) { player.PrintToConsole("[Skins] No skins for this weapon."); return; }
                 ctx.CurrentPage = 0;
                 ShowSkinPage(player);
                 break;
 
+            // ── Knife/Glove type selection ──
+            case MenuState.CategorySelect:
+                if (ctx.SelectedWeaponName == "__knives__")
+                {
+                    if (choice < 1 || choice > KnifeTypes.Length) break;
+                    var (kdef, kname) = KnifeTypes[choice - 1];
+                    ctx.SelectedWeaponName = "__knives__";
+                    ctx.SelectedWeaponDefindex = kdef;
+                    ctx.FilteredSkins = _allSkins.Where(s => s.WeaponDefindex == kdef).OrderBy(s => s.PaintName).ToList();
+                    if (ctx.FilteredSkins.Count == 0) { player.PrintToConsole($"[Skins] No skins for {kname}."); return; }
+                    ctx.CurrentPage = 0;
+                    ShowSkinPage(player);
+                }
+                else if (ctx.SelectedWeaponName == "__gloves__")
+                {
+                    if (choice < 1 || choice > GloveTypes.Length) break;
+                    var (gdef, gname) = GloveTypes[choice - 1];
+                    ctx.SelectedWeaponName = "__gloves__";
+                    ctx.SelectedWeaponDefindex = gdef;
+                    ctx.FilteredSkins = _allGloves.Where(g => g.WeaponDefindex == gdef).OrderBy(g => g.PaintName).ToList();
+                    if (ctx.FilteredSkins.Count == 0) { player.PrintToConsole($"[Skins] No skins for {gname}."); return; }
+                    ctx.CurrentPage = 0;
+                    ShowSkinPage(player);
+                }
+                break;
+
+            // ── Skin page selection ──
             case MenuState.SkinPage:
-                var start = ctx.CurrentPage * PlayerMenuContext.PageSize;
-                var skins = ctx.FilteredSkins.Skip(start).Take(PlayerMenuContext.PageSize).ToList();
+                var start = ctx.CurrentPage * pageSize;
+                var skins = ctx.FilteredSkins.Skip(start).Take(pageSize).ToList();
                 if (choice < 1 || choice > skins.Count) break;
                 var skin = skins[choice - 1];
                 SaveAndApply(player, skin);
@@ -799,31 +938,51 @@ public class CS2AdminSkins : BasePlugin
             _playerSkins[steamId] = sel;
         }
 
+        bool isKnife = KnifeDefindexes.Contains(skin.WeaponDefindex);
+        bool isGlove = GloveDefindexes.Contains(skin.WeaponDefindex);
+
         sel.WeaponPaints[skin.WeaponDefindex] = skin.Paint;
         sel.WeaponLegacy[skin.WeaponDefindex] = skin.LegacyModel;
-
-        // Preserve existing StatTrak count if switching skins on same weapon
         if (!sel.StatTrakCounts.ContainsKey(skin.WeaponDefindex))
             sel.StatTrakCounts[skin.WeaponDefindex] = 0;
+
+        string typeLabel;
+        if (isKnife)
+        {
+            sel.SelectedKnife = skin.WeaponDefindex;
+            typeLabel = "Knife";
+        }
+        else if (isGlove)
+        {
+            sel.SelectedGlove = skin.WeaponDefindex;
+            typeLabel = "Gloves";
+        }
+        else
+        {
+            typeLabel = "Weapon";
+        }
 
         var kills = sel.StatTrakCounts[skin.WeaponDefindex];
 
         player.PrintToConsole("");
-        player.PrintToConsole($"  >>> APPLIED: StatTrak {skin.PaintName} (Factory New)");
-        player.PrintToConsole($"  >>> Paint #{skin.Paint} | Kills: {kills} | Legacy: {skin.LegacyModel}");
-        player.PrintToConsole("  Skin saved — will auto-apply next time you play!");
+        player.PrintToConsole($"  >>> {typeLabel}: StatTrak {skin.PaintName} (Factory New)");
+        player.PrintToConsole($"  >>> Paint #{skin.Paint} | Kills: {kills}");
+        player.PrintToConsole("  Saved! Will auto-apply next time.");
         player.PrintToConsole("");
 
-        player.PrintToChat($" \x04[Skins]\x01 Applied \x10StatTrak {skin.PaintName} (FN)\x01! Refreshing...");
+        player.PrintToChat($" \x04[Skins]\x01 {typeLabel}: \x10ST {skin.PaintName} (FN)\x01 applied!");
 
         CloseMenu(player);
-
-        // Persist to disk
         SaveAllPlayerSelections();
 
-        // Refresh weapons so the hook applies the new skin
+        // Refresh
         if (player.PawnIsAlive)
-            RefreshPlayerWeapons(player);
+        {
+            if (isGlove)
+                ApplyGloves(player);
+            else
+                RefreshPlayerWeapons(player);
+        }
     }
 
     private void CloseMenu(CCSPlayerController player)
