@@ -19,26 +19,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Player, BanEntry } from "@/types";
-import { UserMinus, Ban, MicOff, Trash2, Users } from "lucide-react";
-
-// Mock data when Wails not available
-const MOCK_PLAYERS: Player[] = [
-  { name: "Player1", steam_id: "STEAM_1:0:12345", ping: 42, score: 12, team: "CT", ip: "192.168.1.1" },
-  { name: "Player2", steam_id: "STEAM_1:0:67890", ping: 55, score: 8, team: "T", ip: "192.168.1.2" },
-];
-
-const MOCK_BANS: BanEntry[] = [
-  {
-    id: "b1",
-    instance_id: "inst1",
-    steam_id: "STEAM_1:0:99999",
-    ip_address: "10.0.0.1",
-    reason: "Cheating",
-    expires_at: null,
-    is_permanent: true,
-    created_at: "2024-01-15T12:00:00Z",
-  },
-];
+import { UserMinus, Ban, MicOff, Trash2, Users, RefreshCw } from "lucide-react";
 
 function formatDate(s: string | null): string {
   if (!s) return "Permanent";
@@ -63,34 +44,27 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [bans, setBans] = useState<BanEntry[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const hasWails = typeof window !== "undefined" && !!(window as any).go?.main?.App;
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchPlayers = useCallback(async () => {
-    if (hasWails) {
-      try {
-        const list = await (window as any).go?.main?.App.GetPlayers(instanceId);
-        setPlayers(Array.isArray(list) ? list : []);
-      } catch {
-        setPlayers([]);
-      }
-    } else {
-      setPlayers(MOCK_PLAYERS);
+    try {
+      const list = await (window as any).go?.main?.App?.GetPlayers?.(instanceId);
+      setPlayers(Array.isArray(list) ? list : []);
+      setLoadError(null);
+    } catch {
+      setPlayers([]);
+      setLoadError("Could not fetch players. Server may not be running or RCON is not connected.");
     }
-  }, [instanceId, hasWails]);
+  }, [instanceId]);
 
   const fetchBans = useCallback(async () => {
-    if (hasWails) {
-      try {
-        const list = await (window as any).go?.main?.App.GetBanList(instanceId);
-        setBans(Array.isArray(list) ? list : []);
-      } catch {
-        setBans([]);
-      }
-    } else {
-      setBans(MOCK_BANS);
+    try {
+      const list = await (window as any).go?.main?.App?.GetBanList?.(instanceId);
+      setBans(Array.isArray(list) ? list : []);
+    } catch {
+      setBans([]);
     }
-  }, [instanceId, hasWails]);
+  }, [instanceId]);
 
   useEffect(() => {
     setLoading(true);
@@ -107,9 +81,8 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
   }, [fetchPlayers]);
 
   const handleKick = async (steamId: string, reason: string) => {
-    if (!hasWails) return;
     try {
-      await (window as any).go?.main?.App.KickPlayer(instanceId, steamId, reason);
+      await (window as any).go?.main?.App?.KickPlayer?.(instanceId, steamId, reason);
       await fetchPlayers();
     } catch (e) {
       console.error(e);
@@ -117,9 +90,8 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
   };
 
   const handleBan = async (steamId: string, durationMinutes: number, reason: string) => {
-    if (!hasWails) return;
     try {
-      await (window as any).go?.main?.App.BanPlayer(instanceId, steamId, durationMinutes, reason);
+      await (window as any).go?.main?.App?.BanPlayer?.(instanceId, steamId, durationMinutes, reason);
       await Promise.all([fetchPlayers(), fetchBans()]);
     } catch (e) {
       console.error(e);
@@ -127,23 +99,35 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
   };
 
   const handleMute = async (steamId: string) => {
-    if (!hasWails) return;
     try {
-      await (window as any).go?.main?.App.MutePlayer(instanceId, steamId);
+      await (window as any).go?.main?.App?.MutePlayer?.(instanceId, steamId);
     } catch (e) {
       console.error(e);
     }
   };
 
   const handleRemoveBan = async (banId: string) => {
-    if (!hasWails) return;
     try {
-      await (window as any).go?.main?.App.RemoveBan(banId);
+      await (window as any).go?.main?.App?.RemoveBan?.(banId);
       await fetchBans();
     } catch (e) {
       console.error(e);
     }
   };
+
+  if (loadError && players.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
+          <Users className="h-12 w-12 text-muted-foreground/50" />
+          <p className="text-muted-foreground text-center">{loadError}</p>
+          <Button variant="outline" size="sm" onClick={() => { setLoadError(null); fetchPlayers(); fetchBans(); }}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (loading && players.length === 0 && bans.length === 0) {
     return (
@@ -160,10 +144,16 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
       {/* Live Players */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Live Players ({players.length})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Live Players ({players.length})
+            </CardTitle>
+            <Button variant="outline" size="sm" onClick={() => { fetchPlayers(); fetchBans(); }}>
+              <RefreshCw className="mr-1 h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
           <CardDescription>Auto-refreshes every 3 seconds</CardDescription>
         </CardHeader>
         <CardContent>
@@ -212,7 +202,6 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
                             className="h-8 w-8"
                             title="Mute"
                             onClick={() => handleMute(p.steam_id)}
-                            disabled={!hasWails}
                           >
                             <MicOff className="h-4 w-4" />
                           </Button>
@@ -266,7 +255,6 @@ export function PlayersTab({ instanceId }: PlayersTabProps) {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleRemoveBan(b.id)}
-                          disabled={!hasWails}
                         >
                           <Trash2 className="mr-1 h-4 w-4" />
                           Remove

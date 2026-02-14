@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Button,
   Card,
@@ -22,7 +22,7 @@ const QUOTA_MODES = [
 
 const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard", "Expert"];
 
-const MOCK_BOT_CONFIG: BotConfig = {
+const DEFAULT_BOT_CONFIG: BotConfig = {
   quota: 0,
   quota_mode: "normal",
   difficulty: 1,
@@ -33,49 +33,58 @@ interface BotsTabProps {
 }
 
 export function BotsTab({ instanceId }: BotsTabProps) {
-  const [config, setConfig] = useState<BotConfig>(MOCK_BOT_CONFIG);
+  const [config, setConfig] = useState<BotConfig>(DEFAULT_BOT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const hasWails = typeof window !== "undefined" && !!(window as any).go?.main?.App;
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    try {
+      const cfg = await (window as any).go?.main?.App?.GetBotConfig?.(instanceId);
+      if (cfg && typeof cfg === "object") {
+        setConfig({
+          quota: typeof cfg.quota === "number" ? cfg.quota : (typeof cfg.Quota === "number" ? cfg.Quota : 0),
+          quota_mode: cfg.quota_mode ?? cfg.QuotaMode ?? "normal",
+          difficulty: typeof cfg.difficulty === "number" ? cfg.difficulty : (typeof cfg.Difficulty === "number" ? cfg.Difficulty : 1),
+        });
+      }
+      setLoadError(null);
+    } catch {
+      setLoadError("Could not fetch bot config. Server may not be running.");
+    } finally {
+      setLoading(false);
+    }
+  }, [instanceId]);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        if (hasWails) {
-          const cfg = await (window as any).go?.main?.App.GetBotConfig(instanceId);
-          if (cfg && typeof cfg === "object") {
-            setConfig({
-              quota: typeof cfg.quota === "number" ? cfg.quota : 0,
-              quota_mode: cfg.quota_mode ?? "normal",
-              difficulty: typeof cfg.difficulty === "number" ? cfg.difficulty : 1,
-            });
-          }
-        } else {
-          setConfig(MOCK_BOT_CONFIG);
-        }
-      } catch {
-        setConfig(MOCK_BOT_CONFIG);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [instanceId, hasWails]);
+    loadConfig();
+  }, [loadConfig]);
 
   const handleApply = async () => {
     setSaving(true);
     try {
-      if (hasWails) {
-        await (window as any).go?.main?.App.UpdateBotConfig(instanceId, config);
-      }
+      await (window as any).go?.main?.App?.UpdateBotConfig?.(instanceId, config);
     } catch (e) {
       console.error(e);
     } finally {
       setSaving(false);
     }
   };
+
+  if (loadError) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
+          <Bot className="h-12 w-12 text-muted-foreground/50" />
+          <p className="text-muted-foreground text-center">{loadError}</p>
+          <Button variant="outline" size="sm" onClick={() => { setLoadError(null); loadConfig(); }}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (loading) {
     return (

@@ -13,6 +13,21 @@ import { cn } from "@/lib/utils";
 import type { MapInfo } from "@/types";
 import { Map as MapIcon, Download, ChevronUp, ChevronDown } from "lucide-react";
 
+const MAP_IMAGES: Record<string, string> = {
+  de_dust2: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_dust2.jpg",
+  de_mirage: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_mirage.jpg",
+  de_inferno: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_inferno.jpg",
+  de_nuke: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_nuke.jpg",
+  de_overpass: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_overpass.jpg",
+  de_ancient: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_ancient.jpg",
+  de_anubis: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_anubis.jpg",
+  de_vertigo: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_vertigo.jpg",
+  cs_office: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/cs_office.jpg",
+  cs_italy: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/cs_italy.jpg",
+  de_train: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_train.jpg",
+  de_cache: "https://cdn.cloudflare.steamstatic.com/apps/csgo/images/cs2/maps/de_cache.jpg",
+};
+
 // Mock data when Wails not available
 const MOCK_MAPS: MapInfo[] = [
   { name: "de_dust2", file_name: "de_dust2.bsp", size_bytes: 0 },
@@ -170,36 +185,46 @@ export function MapsTab({ instanceId }: MapsTabProps) {
           <CardDescription>Maps available on this server instance</CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[280px]">
+          <ScrollArea className="h-[400px]">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {maps.map((m) => (
                 <div
                   key={m.name}
-                  className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-4 transition-colors hover:bg-muted/40"
+                  className="group flex flex-col overflow-hidden rounded-lg border border-border bg-muted/20 transition-colors hover:border-primary/50"
                 >
-                  <div className="flex items-center gap-2">
-                    <MapIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
-                    <span className="truncate font-mono font-medium">{m.name}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{formatSize(m.size_bytes)}</p>
-                  <div className="mt-auto flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleChangeMap(m.name)}
-                      disabled={!!changingMap}
-                    >
-                      {changingMap === m.name ? "Changing..." : "Change Map"}
-                    </Button>
-                    {rotation.includes(m.name) ? (
-                      <Button size="sm" variant="ghost" onClick={() => removeFromRotation(m.name)}>
-                        Remove from rotation
-                      </Button>
+                  <div className="relative aspect-[16/10] w-full bg-muted overflow-hidden">
+                    {MAP_IMAGES[m.name] ? (
+                      <img
+                        src={MAP_IMAGES[m.name]}
+                        alt={m.name}
+                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
                     ) : (
-                      <Button size="sm" variant="ghost" onClick={() => addToRotation(m.name)}>
-                        Add to rotation
-                      </Button>
+                      <div className="flex h-full items-center justify-center">
+                        <MapIcon className="h-8 w-8 text-muted-foreground/40" />
+                      </div>
                     )}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
+                      <span className="font-mono text-sm font-medium text-white">{m.name}</span>
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-2">
+                    <p className="text-xs text-muted-foreground">{formatSize(m.size_bytes)}</p>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => handleChangeMap(m.name)} disabled={!!changingMap}>
+                        {changingMap === m.name ? "Changing..." : "Play"}
+                      </Button>
+                      {rotation.includes(m.name) ? (
+                        <Button size="sm" variant="ghost" onClick={() => removeFromRotation(m.name)}>
+                          Remove
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" onClick={() => addToRotation(m.name)}>
+                          + Rotation
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

@@ -128,7 +128,8 @@ func extractFile(f *zip.File, dest string) error {
 
 // Run executes SteamCMD with the given args, parses stdout for progress, and sends
 // Progress structs to progressCh. Closes progressCh when done. progressCh may be nil.
-func (s *SteamCMD) Run(args []string, progressCh chan<- Progress) error {
+// lineFn is called for every raw stdout/stderr line (may be nil).
+func (s *SteamCMD) Run(args []string, progressCh chan<- Progress, lineFn ...func(string)) error {
 	if err := s.EnsureInstalled(); err != nil {
 		return err
 	}
@@ -145,10 +146,25 @@ func (s *SteamCMD) Run(args []string, progressCh chan<- Progress) error {
 		return fmt.Errorf("start steamcmd: %w", err)
 	}
 
+	// Extract optional line callback
+	var onLine func(string)
+	if len(lineFn) > 0 && lineFn[0] != nil {
+		onLine = lineFn[0]
+	}
+
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
 		logger.Log.Debug().Str("steamcmd", line).Msg("")
+
+		// Send raw line to callback
+		if onLine != nil {
+			onLine(line)
+		}
+
 		if p := ParseProgressLine(line); p != nil && progressCh != nil {
 			select {
 			case progressCh <- *p:
@@ -172,7 +188,7 @@ func (s *SteamCMD) Run(args []string, progressCh chan<- Progress) error {
 }
 
 // InstallCS2 installs CS2 to installDir with validation.
-func (s *SteamCMD) InstallCS2(installDir string, progressCh chan<- Progress) error {
+func (s *SteamCMD) InstallCS2(installDir string, progressCh chan<- Progress, lineFn ...func(string)) error {
 	absDir, err := filepath.Abs(installDir)
 	if err != nil {
 		return fmt.Errorf("resolve install dir: %w", err)
@@ -183,7 +199,7 @@ func (s *SteamCMD) InstallCS2(installDir string, progressCh chan<- Progress) err
 		"+app_update", "730", "validate",
 		"+quit",
 	}
-	return s.Run(args, progressCh)
+	return s.Run(args, progressCh, lineFn...)
 }
 
 // UpdateCS2 updates CS2 at installDir without validation.

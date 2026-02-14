@@ -104,6 +104,7 @@ export function CreateInstanceWizard({
   const [installError, setInstallError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [installLines, setInstallLines] = useState<string[]>([]);
 
   // Load presets
   useEffect(() => {
@@ -236,6 +237,7 @@ export function CreateInstanceWizard({
     setInstallError(null);
     setIsCreating(false);
     setIsInstalling(false);
+    setInstallLines([]);
   }, [defaultInstallPath, appConfig?.default_install_dir]);
 
   const handleClose = useCallback(() => {
@@ -245,12 +247,9 @@ export function CreateInstanceWizard({
 
   const handleBrowse = async () => {
     try {
-      // Use Wails native directory dialog
-      const fn = (window as any).runtime?.OpenDirectoryDialog;
+      const fn = (window as any).go?.main?.App?.BrowseDirectory;
       if (typeof fn === "function") {
-        const result = await fn({
-          Title: "Select Install Directory",
-        });
+        const result = await fn();
         if (result) {
           setInstallPath(result);
         }
@@ -366,6 +365,22 @@ export function CreateInstanceWizard({
     (window as any).runtime?.EventsOn?.(eventName, cb);
     return () => {
       (window as any).runtime?.EventsOff?.(eventName);
+    };
+  }, [step, createdInstance?.id]);
+
+  // SteamCMD raw output listener for mini terminal
+  useEffect(() => {
+    if (step !== 3 || !createdInstance?.id) return;
+    const lineEvent = `install-line:${createdInstance.id}`;
+    const lineCb = (line: unknown) => {
+      setInstallLines(prev => {
+        const next = [...prev, String(line)];
+        return next.length > 500 ? next.slice(-500) : next;
+      });
+    };
+    (window as any).runtime?.EventsOn?.(lineEvent, lineCb);
+    return () => {
+      (window as any).runtime?.EventsOff?.(lineEvent);
     };
   }, [step, createdInstance?.id]);
 
@@ -619,6 +634,24 @@ export function CreateInstanceWizard({
                           {progress.message}
                         </p>
                       )}
+                    </div>
+                  )}
+
+                  {installLines.length > 0 && (
+                    <div
+                      className="rounded-lg border border-border bg-zinc-950 p-3 font-mono text-xs text-green-400 h-40 overflow-y-auto"
+                      ref={(el) => {
+                        if (el) el.scrollTop = el.scrollHeight;
+                      }}
+                    >
+                      {installLines.map((line, i) => (
+                        <div
+                          key={i}
+                          className="whitespace-pre-wrap break-all leading-relaxed"
+                        >
+                          {line}
+                        </div>
+                      ))}
                     </div>
                   )}
 

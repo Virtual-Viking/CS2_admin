@@ -30,6 +30,7 @@ type Manager struct {
 	mu         sync.RWMutex
 	onOutput   func(instanceID, line string)
 	onStatus   func(instanceID, status string)
+	decryptFn  func(string) (string, error) // decrypts encrypted fields from DB
 }
 
 // NewManager creates a new Manager with the given database.
@@ -52,6 +53,13 @@ func (m *Manager) SetOnOutput(fn func(instanceID, line string)) {
 	} else {
 		m.onOutput = func(_, _ string) {}
 	}
+}
+
+// SetDecryptFn sets the function used to decrypt encrypted DB fields (e.g., RCON password).
+func (m *Manager) SetDecryptFn(fn func(string) (string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.decryptFn = fn
 }
 
 // SetOnStatus sets the callback invoked when instance status changes.
@@ -252,9 +260,12 @@ func (m *Manager) buildLaunchArgs(inst *models.ServerInstance) []string {
 	if maxPlayers <= 0 {
 		maxPlayers = 10
 	}
-	rconPass := inst.RconPassword
-	if rconPass == "" {
-		rconPass = "changeme"
+	// Decrypt the RCON password from the DB
+	rconPass := "cs2admin" // default
+	if inst.RconPassword != "" && m.decryptFn != nil {
+		if decrypted, err := m.decryptFn(inst.RconPassword); err == nil && decrypted != "" {
+			rconPass = decrypted
+		}
 	}
 
 	args := []string{
@@ -266,7 +277,6 @@ func (m *Manager) buildLaunchArgs(inst *models.ServerInstance) []string {
 		"+map", mapName,
 		"-maxplayers", fmt.Sprintf("%d", maxPlayers),
 		"+rcon_password", rconPass,
-		"-console",
 		"-usercon",
 	}
 

@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,6 +68,9 @@ func (a *App) startup(ctx context.Context) {
 
 	// Initialize instance manager with event callbacks
 	a.instanceMgr = instance.NewManager(a.db)
+	a.instanceMgr.SetDecryptFn(func(encrypted string) (string, error) {
+		return crypto.Decrypt(encrypted, a.encKey)
+	})
 	a.instanceMgr.SetOnOutput(func(instanceID, line string) {
 		wailsruntime.EventsEmit(a.ctx, "console:"+instanceID, line)
 	})
@@ -227,13 +233,14 @@ func (a *App) GetInstance(id string) (*models.ServerInstance, error) {
 
 // CreateInstance creates a new server instance.
 func (a *App) CreateInstance(cfg InstanceConfig) (*models.ServerInstance, error) {
-	encPass := ""
-	if cfg.RconPassword != "" {
-		var err error
-		encPass, err = crypto.Encrypt(cfg.RconPassword, a.encKey)
-		if err != nil {
-			return nil, fmt.Errorf("encrypt rcon password: %w", err)
-		}
+	// Auto-generate RCON password if not provided — must match what buildLaunchArgs uses
+	rconPass := cfg.RconPassword
+	if rconPass == "" {
+		rconPass = "cs2admin"
+	}
+	encPass, err := crypto.Encrypt(rconPass, a.encKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt rcon password: %w", err)
 	}
 
 	inst := models.ServerInstance{
@@ -307,9 +314,37 @@ func (a *App) DeleteInstance(id string) error {
 	return a.db.Where("id = ?", id).Delete(&models.ServerInstance{}).Error
 }
 
-// StartInstance starts a server instance.
+// BrowseDirectory opens a native directory picker dialog and returns the selected path.
+func (a *App) BrowseDirectory() (string, error) {
+	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select Directory",
+	})
+}
+
+// StartInstance starts a server instance and auto-starts monitoring.
 func (a *App) StartInstance(id string) error {
-	return a.instanceMgr.Start(id)
+	// Ensure the instance has an encrypted RCON password (fix for legacy empty passwords)
+	var inst models.ServerInstance
+	if err := a.db.Where("id = ?", id).First(&inst).Error; err == nil {
+		if inst.RconPassword == "" {
+			if encPass, err := crypto.Encrypt("cs2admin", a.encKey); err == nil {
+				a.db.Model(&models.ServerInstance{}).Where("id = ?", id).Update("rcon_password", encPass)
+			}
+		}
+	}
+
+	if err := a.instanceMgr.Start(id); err != nil {
+		return err
+	}
+	// Auto-start metrics collector
+	go func() {
+		// Brief delay to allow the server to start listening
+		time.Sleep(3 * time.Second)
+		if err := a.StartMetrics(id); err != nil {
+			logger.Log.Warn().Err(err).Str("instance", id).Msg("auto-start metrics failed (server may not have RCON ready yet)")
+		}
+	}()
+	return nil
 }
 
 // StopInstance stops a server instance.
@@ -337,16 +372,26 @@ func (a *App) SendRCON(instanceID string, command string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("instance not found: %w", err)
 		}
-		password, err := crypto.Decrypt(inst.RconPassword, a.encKey)
-		if err != nil {
-			return "", fmt.Errorf("decrypt rcon password: %w", err)
-		}
+		password := a.getRconPassword(inst)
 		addr := fmt.Sprintf("127.0.0.1:%d", inst.Port)
 		if err := a.rconPool.Connect(instanceID, addr, password); err != nil {
 			return "", fmt.Errorf("rcon connect: %w", err)
 		}
 	}
 	return a.rconPool.Execute(instanceID, command)
+}
+
+// getRconPassword decrypts the RCON password from the instance, falling back to the default.
+func (a *App) getRconPassword(inst *models.ServerInstance) string {
+	if inst.RconPassword == "" {
+		return "cs2admin"
+	}
+	password, err := crypto.Decrypt(inst.RconPassword, a.encKey)
+	if err != nil {
+		logger.Log.Warn().Err(err).Msg("Failed to decrypt RCON password, using default")
+		return "cs2admin"
+	}
+	return password
 }
 
 // GetCommandHistory returns the RCON command history for an instance.
@@ -600,9 +645,11 @@ func (a *App) InstallCS2Server(instanceID string) error {
 	}
 
 	// Ensure SteamCMD is installed
+	wailsruntime.EventsEmit(a.ctx, "install-line:"+instanceID, "Checking SteamCMD installation...")
 	if err := a.steamCmd.EnsureInstalled(); err != nil {
 		return fmt.Errorf("steamcmd setup: %w", err)
 	}
+	wailsruntime.EventsEmit(a.ctx, "install-line:"+instanceID, "SteamCMD ready.")
 
 	// Update status
 	a.db.Model(&models.ServerInstance{}).Where("id = ?", instanceID).Update("status", "installing")
@@ -615,14 +662,23 @@ func (a *App) InstallCS2Server(instanceID string) error {
 		}
 	}()
 
-	if err := a.steamCmd.InstallCS2(inst.InstallPath, progressCh); err != nil {
+	// Line callback sends raw SteamCMD output to frontend mini-terminal
+	lineFn := func(line string) {
+		wailsruntime.EventsEmit(a.ctx, "install-line:"+instanceID, line)
+	}
+
+	wailsruntime.EventsEmit(a.ctx, "install-line:"+instanceID, fmt.Sprintf("Installing CS2 to %s ...", inst.InstallPath))
+
+	if err := a.steamCmd.InstallCS2(inst.InstallPath, progressCh, lineFn); err != nil {
 		a.db.Model(&models.ServerInstance{}).Where("id = ?", instanceID).Update("status", "stopped")
 		wailsruntime.EventsEmit(a.ctx, "status:"+instanceID, "stopped")
+		wailsruntime.EventsEmit(a.ctx, "install-line:"+instanceID, "ERROR: "+err.Error())
 		return err
 	}
 
 	a.db.Model(&models.ServerInstance{}).Where("id = ?", instanceID).Update("status", "stopped")
 	wailsruntime.EventsEmit(a.ctx, "status:"+instanceID, "stopped")
+	wailsruntime.EventsEmit(a.ctx, "install-line:"+instanceID, "Installation complete!")
 	logger.Log.Info().Str("id", instanceID).Msg("CS2 server installed")
 	return nil
 }
@@ -706,6 +762,74 @@ func (a *App) TestDiscordWebhook() error {
 	n := notify.New()
 	n.SetDiscordURL(a.cfg.DiscordWebhook)
 	return n.SendDiscord("CS2 Admin Test", "This is a test notification from CS2 Admin.", 0x00FF00)
+}
+
+// ExportSkinDatabaseJSON exports the skin database as a JSON file to the given instance's
+// plugin directory so the CS2AdminSkins plugin can load it.
+func (a *App) ExportSkinDatabaseJSON(instanceID string) error {
+	inst, err := a.GetInstance(instanceID)
+	if err != nil {
+		return err
+	}
+
+	var skins []models.Skin
+	if err := a.db.Order("rarity, name").Find(&skins).Error; err != nil {
+		return fmt.Errorf("query skins: %w", err)
+	}
+
+	type SkinEntry struct {
+		PaintKitID int     `json:"PaintKitId"`
+		Name       string  `json:"Name"`
+		WeaponType string  `json:"WeaponType"`
+		Rarity     string  `json:"Rarity"`
+		Category   string  `json:"Category"`
+		MinFloat   float64 `json:"MinFloat"`
+		MaxFloat   float64 `json:"MaxFloat"`
+	}
+
+	rarityToCategory := map[string]string{
+		"Mil-Spec Grade": "blue",
+		"Restricted":     "purple",
+		"Classified":     "pink",
+		"Covert":         "red",
+		"Extraordinary":  "gold",
+		"Contraband":     "gold",
+	}
+
+	var entries []SkinEntry
+	for _, s := range skins {
+		cat := rarityToCategory[s.Rarity]
+		if cat == "" {
+			cat = "blue"
+		}
+		entries = append(entries, SkinEntry{
+			PaintKitID: s.PaintKitID,
+			Name:       s.Name,
+			WeaponType: s.WeaponType,
+			Rarity:     s.Rarity,
+			Category:   cat,
+			MinFloat:   s.MinFloat,
+			MaxFloat:   s.MaxFloat,
+		})
+	}
+
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal skins: %w", err)
+	}
+
+	pluginDir := filepath.Join(inst.InstallPath, "game", "csgo", "addons", "counterstrikesharp", "plugins", "CS2AdminSkins")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		return fmt.Errorf("create plugin dir: %w", err)
+	}
+
+	jsonPath := filepath.Join(pluginDir, "skins.json")
+	if err := os.WriteFile(jsonPath, data, 0644); err != nil {
+		return fmt.Errorf("write skins.json: %w", err)
+	}
+
+	logger.Log.Info().Str("path", jsonPath).Int("count", len(entries)).Msg("Exported skin database to plugin")
+	return nil
 }
 
 // GetSkinRarities returns distinct rarity names from the skins table.
@@ -826,10 +950,7 @@ func (a *App) StartMetrics(instanceID string) error {
 	if err != nil {
 		return err
 	}
-	password, err := crypto.Decrypt(inst.RconPassword, a.encKey)
-	if err != nil {
-		return fmt.Errorf("decrypt rcon password: %w", err)
-	}
+	password := a.getRconPassword(inst)
 	addr := fmt.Sprintf("127.0.0.1:%d", inst.Port)
 	c := monitor.NewCollector(instanceID, addr, password, a.db)
 	c.SetRconPool(a.rconPool)
@@ -1078,18 +1199,93 @@ func listMapsInDir(dir string) ([]MapInfo, error) {
 	return maps, nil
 }
 
+// parseStatusPlayers parses the CS2 RCON "status" output into Player structs.
+// CS2 status output format:
+// # userid name uniqueid connected ping loss state rate adr
+// #  2 "PlayerName" STEAM_1:0:12345678 01:23 45 0 active 786432 192.168.1.2:27005
+// #  3 "BotName" BOT 01:23 0 0 active 0
 func parseStatusPlayers(status string) []Player {
-	// Simple parser for RCON "status" output
-	// Format varies; this returns empty for now — will be refined when testing against real server
-	return []Player{}
+	var players []Player
+	lines := strings.Split(status, "\n")
+
+	// Regex to match player lines:
+	// # <userid> <name> <steamid> <connected> <ping> <loss> <state> <rate> [<adr>]
+	playerRe := regexp.MustCompile(`#\s+(\d+)\s+"([^"]+)"\s+(\S+)\s+\S+\s+(\d+)\s+\d+\s+(\w+)\s+\d+(?:\s+(\S+))?`)
+
+	// Also parse the "players" summary line for team info
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#") || strings.HasPrefix(line, "# userid") {
+			continue
+		}
+
+		m := playerRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+
+		steamID := m[3]
+		if steamID == "BOT" {
+			continue // Skip bots in player list
+		}
+
+		ping := 0
+		if v, err := strconv.Atoi(m[4]); err == nil {
+			ping = v
+		}
+
+		ip := ""
+		if len(m) >= 7 {
+			ip = m[6]
+			// Strip port from IP
+			if idx := strings.LastIndex(ip, ":"); idx > 0 {
+				ip = ip[:idx]
+			}
+		}
+
+		players = append(players, Player{
+			Name:    m[2],
+			SteamID: steamID,
+			Ping:    ping,
+			Score:   0, // Score not in status output, would need separate query
+			Team:    "", // Team not in status output
+			IP:      ip,
+		})
+	}
+
+	return players
 }
 
+// parseIntFromCvarResponse parses an RCON cvar query response.
+// Typical format: "bot_quota" = "10" ( def. "10" ) min. 0.000000 max. 64.000000
+// or: "bot_quota" is "10"
 func parseIntFromCvarResponse(resp string) int {
-	// RCON cvar responses look like: "bot_quota" = "10" ( def. "10" )
-	// Simple parse — return 0 if can't parse
+	// Try: "cvar" = "value"
+	re := regexp.MustCompile(`"[^"]*"\s*(?:=|is)\s*"(\d+)"`)
+	m := re.FindStringSubmatch(resp)
+	if m != nil {
+		v, _ := strconv.Atoi(m[1])
+		return v
+	}
+	// Fallback: just find any bare number in the response
+	numRe := regexp.MustCompile(`\b(\d+)\b`)
+	all := numRe.FindAllStringSubmatch(resp, -1)
+	for _, a := range all {
+		v, _ := strconv.Atoi(a[1])
+		if v > 0 {
+			return v
+		}
+	}
 	return 0
 }
 
+// parseStringFromCvarResponse parses a string value from an RCON cvar query response.
 func parseStringFromCvarResponse(resp string) string {
+	// Try: "cvar" = "value"
+	re := regexp.MustCompile(`"[^"]*"\s*(?:=|is)\s*"([^"]*)"`)
+	m := re.FindStringSubmatch(resp)
+	if m != nil {
+		return m[1]
+	}
 	return ""
 }
